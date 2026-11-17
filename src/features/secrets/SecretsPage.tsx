@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowRightLeft,
   BookOpen,
   ChevronRight,
+  ClipboardPaste,
   Columns3,
   Database,
+  Download,
   Eye,
   EyeOff,
   FileJson,
@@ -14,19 +16,33 @@ import {
   FolderOpen,
   History,
   KeyRound,
+  Link2,
   Lock,
+  MessageSquareText,
   Pencil,
   Plus,
   Search,
+  Tag,
   TerminalSquare,
-  Trash2,
+  Upload,
+  UserRound,
 } from 'lucide-react';
 import { bao, type CapabilitiesMap } from '@/lib/api';
 import { can, deniedReason } from '@/lib/capabilities';
 import { envRank, secretApiPath, secretPath } from '@/lib/baoPaths';
 import { envFile, formatWhen, mask } from '@/lib/format';
 import { dataFromRows, rowsFromData, validateRows, type FieldRow } from '@/lib/secretForm';
+import { buildReferenceLookup, findReferences, resolveReferences, parseKeyValueText, serializeKeyValue, type ImportFormat } from '@/lib/secretFormats';
+import {
+  effectiveValue,
+  mergeAnnotations,
+  overridesFor,
+  parseAnnotations,
+  withOverridesFor,
+  type SecretAnnotations,
+} from '@/lib/secretMetadata';
 import { buildSecretTree, folderBreadcrumbs, folderInTree, secretName, validSecretPath, type SecretTreeFolder } from '@/lib/secretTree';
+import { useAuth } from '@/lib/auth';
 import {
   capabilityPathsForFolder,
   useCapabilities,
@@ -44,16 +60,29 @@ import { Button } from '@/components/common/Button';
 import { CopyButton, Dialog, EmptyState, EnvBadge, ErrorState } from '@/components/common/Extras';
 import { RecentActivityPanel } from './RecentActivityPanel';
 import { CompareEnvsPanel } from './CompareEnvsPanel';
+import { FieldTable } from './FieldTable';
 
 type Search = Record<string, string | undefined>;
 
-function SecretField({ name, value }: { name: string; value: unknown }) {
+function SecretField({ name, value, comment, override, resolved }: {
+  name: string;
+  value: unknown;
+  comment?: string;
+  override?: string;
+  resolved?: string;
+}) {
   const [revealed, setRevealed] = useState(false);
-  const display = revealed ? String(value ?? '') : mask(value);
+  const overridden = override !== undefined;
+  const actual = effectiveValue(name, value, overridden ? { [name]: override! } : {});
+  const display = revealed ? actual : mask(value);
 
   return (
     <div className="secret-field" data-testid={`field-${name}`}>
-      <span className="secret-field__key" title={name}>{name}</span>
+      <span className="secret-field__key" title={name}>
+        {name}
+        {overridden && <Badge size="small" variant="info" title="Personal override is applied for this identity"><UserRound size={11} /> override</Badge>}
+        {comment && <span className="secret-field__comment" title={comment}><MessageSquareText size={12} /> {comment}</span>}
+      </span>
       <span className={`secret-field__value ${revealed ? '' : 'masked'}`}>{display}</span>
       <span className="secret-field__actions">
         <button
@@ -64,8 +93,13 @@ function SecretField({ name, value }: { name: string; value: unknown }) {
         >
           {revealed ? <EyeOff size={16} /> : <Eye size={16} />}
         </button>
-        <CopyButton value={value === null || value === undefined ? '' : String(value)} label={`Copy ${name}`} />
+        <CopyButton value={actual} label={`Copy ${name}`} />
       </span>
+      {resolved && (
+        <span className="secret-field__resolved mono" title="Resolved from references in this environment">
+          <Link2 size={12} /> {revealed ? resolved : mask(resolved)}
+        </span>
+      )}
     </div>
   );
 }
@@ -166,6 +200,8 @@ export function SecretsPage() {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
   const copy = useClipboard();
+  const { identity } = useAuth();
+  const identityName = identity?.display_name || identity?.name || 'local';
 
   const projects = useProjects();
   const [project, setProject] = useState<string | undefined>(search.project);
@@ -187,10 +223,21 @@ export function SecretsPage() {
     name: string;
     rows: FieldRow[];
     cas: number;
+    annotations: SecretAnnotations;
+    baseMetadata: Record<string, string>;
   } | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [revealValues, setRevealValues] = useState(false);
+  const [dialog, setDialog] = useState<'bulk' | 'import' | 'export' | 'source' | null>(null);
+  const [bulkText, setBulkText] = useState('');
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [importFormat, setImportFormat] = useState<ImportFormat>('env');
+  const [importText, setImportText] = useState('');
+  const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
+  const [importError, setImportError] = useState<string | null>(null);
+  const [exportFormat, setExportFormat] = useState<ImportFormat>('env');
+  const [sourceEnv, setSourceEnv] = useState<string | null>(null);
 
   useEffect(() => {
     if (!project && projects.data?.length) setProject(search.project ?? projects.data[0]);
@@ -229,21 +276,64 @@ export function SecretsPage() {
   const caps = capsQ.data;
   const secretQ = useSecret(project, env, service, version);
   const metadataQ = useSecretMetadata(project, env, service);
+  // Values for ${path.FIELD} previews. Reads are masked in the UI and never shown in snippets.
+  const refQueries = useQueries({
+    queries: allPaths.map((path) => ({
+      queryKey: ['secret', project, env, path, 'refs'],
+      queryFn: () => bao.readSecret(secretApiPath(project!, env!, path)),
+      enabled: Boolean(project && env),
+      retry: false,
+      staleTime: 15_000,
+    })),
+  });
+  const referenceLookup = useMemo(() => buildReferenceLookup(
+    allPaths.flatMap((path, index) => refQueries[index]?.data ? [{ path, data: refQueries[index].data!.data.data }] : []),
+  ), [allPaths, refQueries]);
+  const annotations = useMemo(() => parseAnnotations(metadataQ.data?.data.custom_metadata), [metadataQ.data]);
+  const myOverrides = useMemo(() => overridesFor(annotations, identityName), [annotations, identityName]);
 
   const currentPath = project && env && service ? secretPath(project, env, service) : '';
   const apiPath = project && env && service ? secretApiPath(project, env, service) : '';
   const newPath = project && env ? `kv/data/${project}/env/${env}/${folder}/__new__` : '';
+  const metaWritePath = currentPath ? currentPath.replace(/^kv\/data\//, 'kv/metadata/') : '';
   const writable = can(caps, currentPath, 'update') || can(caps, currentPath, 'create');
   const canCreate = can(caps, newPath, 'create') || can(caps, newPath, 'update');
+  const canWriteMeta = can(caps, metaWritePath, 'update') ||
+    can(caps, `kv/metadata/${project}/env/${env}/${folder}/__new__`, 'create');
   const folderNode = folderInTree(tree, folder) ?? tree;
   const filteredSecrets = folderNode.secrets.filter((path) => secretName(path).toLowerCase().includes(filter.toLowerCase()));
   const crumbs = folderBreadcrumbs(folder);
 
   function updateRow(id: string, patch: Partial<FieldRow>) {
-    setEditor((current) => current && {
-      ...current,
-      rows: current.rows.map((row) => (row.id === id ? { ...row, ...patch } : row)),
+    setEditor((current) => {
+      if (!current) return current;
+      const oldKey = current.rows.find((row) => row.id === id)?.key.trim() ?? '';
+      const nextKey = (patch.key ?? oldKey).trim();
+      let annotations = current.annotations;
+      // Keep comments and personal overrides attached to a field when it is renamed.
+      if (oldKey && nextKey && oldKey !== nextKey) {
+        const comments = { ...annotations.comments };
+        if (comments[oldKey] !== undefined) {
+          comments[nextKey] = comments[oldKey];
+          delete comments[oldKey];
+        }
+        const own = { ...overridesFor(annotations, identityName) };
+        if (own[oldKey] !== undefined) {
+          own[nextKey] = own[oldKey];
+          delete own[oldKey];
+        }
+        annotations = withOverridesFor({ ...annotations, comments }, identityName, own);
+      }
+      return {
+        ...current,
+        rows: current.rows.map((row) => (row.id === id ? { ...row, ...patch } : row)),
+        annotations,
+      };
     });
+  }
+
+  function removeRow(id: string) {
+    setEditor((current) => current && { ...current, rows: current.rows.filter((row) => row.id !== id) });
   }
 
   function addRow() {
@@ -253,22 +343,105 @@ export function SecretsPage() {
     });
   }
 
+  function setComment(key: string, value: string) {
+    setEditor((current) => current && {
+      ...current,
+      annotations: { ...current.annotations, comments: { ...current.annotations.comments, [key]: value } },
+    });
+  }
+
+  function setOverride(key: string, value: string | null) {
+    setEditor((current) => {
+      if (!current) return current;
+      const own = { ...overridesFor(current.annotations, identityName) };
+      if (value === null) delete own[key];
+      else own[key] = value;
+      return { ...current, annotations: withOverridesFor(current.annotations, identityName, own) };
+    });
+  }
+
+  function setTags(value: string) {
+    const tags = value.split(',').map((tag) => tag.trim()).filter(Boolean);
+    setEditor((current) => current && { ...current, annotations: { ...current.annotations, tags } });
+  }
+
+  function applyImported(data: Record<string, string>, mode: 'merge' | 'replace') {
+    setEditor((current) => {
+      if (!current) return current;
+      const stamp = Date.now();
+      const incoming = rowsFromData(data).map((row) => ({ ...row, id: `import-${stamp}-${row.id}` }));
+      const rows = mode === 'replace'
+        ? incoming
+        : [...current.rows.filter((row) => row.key.trim() && !(row.key.trim() in data)), ...incoming];
+      return { ...current, rows };
+    });
+  }
+
+  function applyBulk() {
+    const result = parseKeyValueText(bulkText, 'tsv');
+    if (result.error) {
+      setBulkError(result.error);
+      return;
+    }
+    applyImported(result.data, 'merge');
+    setBulkText('');
+    setBulkError(null);
+    setDialog(null);
+    addToast('success', `${Object.keys(result.data).length} fields staged`, 'Save the secret to write them.');
+  }
+
+  function applyImport() {
+    const result = parseKeyValueText(importText, importFormat);
+    if (result.error) {
+      setImportError(result.error);
+      return;
+    }
+    applyImported(result.data, importMode);
+    setImportText('');
+    setImportError(null);
+    setDialog(null);
+    addToast('success', `Imported ${Object.keys(result.data).length} fields from ${importFormat.toUpperCase()}`, 'Review the table before saving.');
+  }
+
+  function downloadExport() {
+    if (!editor) return;
+    const text = serializeKeyValue(dataFromRows(editor.rows), exportFormat);
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${editor.name.replace(/[^\w.-]+/g, '_') || 'secret'}.${exportFormat === 'env' ? 'env' : exportFormat}`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function openCreate() {
     setEditorError(null);
-    setEditor({ mode: 'create', name: folder ? `${folder}/` : '', rows: [{ id: 'new-0', key: '', value: '' }], cas: 0 });
+    setDialog(null);
+    setEditor({
+      mode: 'create',
+      name: folder ? `${folder}/` : '',
+      rows: [{ id: 'new-0', key: '', value: '' }],
+      cas: 0,
+      annotations: { tags: [], note: '', comments: {}, overrides: {} },
+      baseMetadata: {},
+    });
   }
 
   async function openEdit() {
     if (!project || !env || !service) return;
     setEditorError(null);
+    setDialog(null);
     try {
       // Always edit the latest version, even if an older version is being viewed.
-      const latest = await bao.readSecret(secretApiPath(project, env, service));
+      const api = secretApiPath(project, env, service);
+      const [latest, meta] = await Promise.all([bao.readSecret(api), bao.readMetadata(api)]);
       setEditor({
         mode: 'edit',
         name: service,
         rows: rowsFromData(latest.data.data),
         cas: latest.data.metadata.version,
+        annotations: parseAnnotations(meta.data.custom_metadata),
+        baseMetadata: meta.data.custom_metadata ?? {},
       });
     } catch (error) {
       addToast('error', 'Could not load the secret', error instanceof Error ? error.message : undefined);
@@ -292,6 +465,12 @@ export function SecretsPage() {
     try {
       // bao.writeSecret() adds the kv/data/ prefix, so pass the bare API path.
       await bao.writeSecret(`${project}/env/${env}/${name}`, dataFromRows(editor.rows), editor.cas);
+      const custom = mergeAnnotations(editor.baseMetadata, editor.annotations);
+      if (canWriteMeta) {
+        await bao.writeCustomMetadata(`${project}/env/${env}/${name}`, custom);
+      } else if (Object.values(custom).some((value) => value && value !== '[]' && value !== '{}' && value !== '')) {
+        addToast('info', 'Values saved, annotations skipped', 'Your token cannot write KV metadata; tags, comments and overrides were not stored.');
+      }
       await queryClient.invalidateQueries();
       addToast(
         'success',
@@ -302,11 +481,30 @@ export function SecretsPage() {
       setFolder(name.includes('/') ? name.slice(0, name.lastIndexOf('/')) : '');
       setVersion(undefined);
       setEditor(null);
+      setDialog(null);
     } catch (error) {
       setEditorError(error instanceof Error ? error.message : 'Save failed');
     } finally {
       setSaving(false);
     }
+  }
+
+  const sourceQuery = useQuery({
+    queryKey: ['secret', project, sourceEnv, editor?.name, 'source-import'],
+    queryFn: () => bao.readSecret(secretApiPath(project!, sourceEnv!, editor!.name)),
+    enabled: Boolean(project && sourceEnv && editor && sourceEnv !== env),
+    retry: false,
+  });
+
+  function applySourceValues() {
+    if (!sourceQuery.data) return;
+    applyImported(
+      Object.fromEntries(Object.entries(sourceQuery.data.data.data).map(([key, value]) => [key, String(value ?? '')])),
+      'merge',
+    );
+    addToast('success', `Staged values from ${sourceEnv}`, 'Review the table before saving.');
+    setDialog(null);
+    setSourceEnv(null);
   }
 
   async function promote() {
@@ -475,8 +673,26 @@ export function SecretsPage() {
                 {secretQ.isError && <ErrorState error={secretQ.error} onRetry={() => void secretQ.refetch()} />}
                 {secretQ.data && (
                   <>
+                    {(annotations.tags.length > 0 || annotations.note) && (
+                      <div className="annotation-strip">
+                        {annotations.tags.map((tag) => <Badge key={tag} size="small" variant="outline"><Tag size={11} /> {tag}</Badge>)}
+                        {annotations.note && <span className="small muted"><MessageSquareText size={12} /> {annotations.note}</span>}
+                      </div>
+                    )}
                     {Object.entries(secretQ.data.data.data).length === 0 && <EmptyState title="Empty secret">This secret has no fields yet.</EmptyState>}
-                    {Object.entries(secretQ.data.data.data).map(([key, value]) => <SecretField key={key} name={key} value={value} />)}
+                    {Object.entries(secretQ.data.data.data).map(([key, value]) => {
+                      const refs = findReferences(String(value ?? ''));
+                      return (
+                        <SecretField
+                          key={key}
+                          name={key}
+                          value={value}
+                          comment={annotations.comments[key]}
+                          override={Object.prototype.hasOwnProperty.call(myOverrides, key) ? myOverrides[key] : undefined}
+                          resolved={refs.length > 0 ? resolveReferences(String(value ?? ''), referenceLookup) : undefined}
+                        />
+                      );
+                    })}
                     <div className="divider" />
                     <div className="meta-row">
                       <span>Version {secretQ.data.data.metadata.version}</span>
@@ -495,6 +711,9 @@ export function SecretsPage() {
                       </Button>
                       <Button size="small" variant="outlined" icon={<FileJson size={15} />} onClick={() => void copy(envFile(secretQ.data!.data.data), 'Shell-safe .env copied')}>
                         Copy .env
+                      </Button>
+                      <Button size="small" variant="outlined" icon={<Upload size={15} />} onClick={() => void openEdit()} disabled={!writable}>
+                        Import
                       </Button>
                       <Button size="small" variant="outlined" icon={<ArrowRightLeft size={15} />} onClick={() => setPromoteTo(envs.find((name) => name !== env) ?? null)} disabled={!writable || envs.length < 2}>
                         Promote to…
@@ -558,7 +777,7 @@ export function SecretsPage() {
       {editor && project && env && (
         <Dialog
           title={editor.mode === 'create' ? `New secret in ${env}` : `Edit ${editor.name}`}
-          onClose={() => setEditor(null)}
+          onClose={() => { if (dialog) setDialog(null); else setEditor(null); }}
           footer={
             <>
               <Button variant="outlined" onClick={() => setEditor(null)} disabled={saving}>Cancel</Button>
@@ -592,44 +811,57 @@ export function SecretsPage() {
             </p>
           )}
 
+          <div className="field-grid">
+            <div className="field">
+              <label htmlFor="secret-tags"><Tag size={12} /> Tags (comma separated)</label>
+              <input
+                id="secret-tags"
+                placeholder="database, critical"
+                value={editor.annotations.tags.join(', ')}
+                onChange={(event) => setTags(event.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="secret-note"><MessageSquareText size={12} /> Note for this secret</label>
+              <input
+                id="secret-note"
+                placeholder="e.g. rotate weekly with the DBA team"
+                value={editor.annotations.note}
+                onChange={(event) => setEditor({ ...editor, annotations: { ...editor.annotations, note: event.target.value } })}
+              />
+            </div>
+          </div>
+
           <div className="divider" />
 
           <div className="field-editor">
             <div className="field-editor__head">
-              <span className="section-title">Fields</span>
-              <label className="check-row">
-                <input type="checkbox" checked={revealValues} onChange={(event) => setRevealValues(event.target.checked)} />
-                Show values
-              </label>
-            </div>
-            {editor.rows.map((row) => (
-              <div className="field-editor__row" key={row.id} data-testid={`edit-row-${row.key || 'new'}`}>
-                <input
-                  aria-label="Field name"
-                  className="mono"
-                  placeholder="FIELD_NAME"
-                  value={row.key}
-                  onChange={(event) => updateRow(row.id, { key: event.target.value })}
-                />
-                <input
-                  aria-label="Field value"
-                  className="mono"
-                  type={revealValues ? 'text' : 'password'}
-                  placeholder="value"
-                  value={row.value}
-                  onChange={(event) => updateRow(row.id, { value: event.target.value })}
-                />
-                <button
-                  className="icon-btn"
-                  aria-label={`Remove ${row.key || 'field'}`}
-                  title="Remove field"
-                  onClick={() => setEditor({ ...editor, rows: editor.rows.filter((item) => item.id !== row.id) })}
-                >
-                  <Trash2 size={15} />
-                </button>
+              <span className="section-title">Fields ({editor.rows.length})</span>
+              <div className="field-editor__tools">
+                <label className="check-row">
+                  <input type="checkbox" checked={revealValues} onChange={(event) => setRevealValues(event.target.checked)} />
+                  Show all values
+                </label>
+                <Button size="small" variant="ghost" icon={<Plus size={14} />} onClick={addRow}>Add field</Button>
+                <Button size="small" variant="ghost" icon={<ClipboardPaste size={14} />} onClick={() => { setBulkError(null); setDialog('bulk'); }}>Bulk paste</Button>
+                <Button size="small" variant="ghost" icon={<Upload size={14} />} onClick={() => { setImportError(null); setDialog('import'); }}>Import</Button>
+                <Button size="small" variant="ghost" icon={<Download size={14} />} onClick={() => setDialog('export')}>Export</Button>
+                {editor.mode === 'edit' && envs.length > 1 && (
+                  <Button size="small" variant="ghost" icon={<ArrowRightLeft size={14} />} onClick={() => { setSourceEnv(null); setDialog('source'); }}>From env…</Button>
+                )}
               </div>
-            ))}
-            <Button size="small" variant="ghost" icon={<Plus size={14} />} onClick={addRow}>Add field</Button>
+            </div>
+            <FieldTable
+              rows={editor.rows}
+              revealAll={revealValues}
+              comments={editor.annotations.comments}
+              overrides={overridesFor(editor.annotations, identityName)}
+              lookup={referenceLookup}
+              onRowChange={updateRow}
+              onRemove={removeRow}
+              onCommentChange={setComment}
+              onOverrideChange={setOverride}
+            />
           </div>
 
           {editorError && <div className="notice error small" role="alert">{editorError}</div>}
@@ -638,8 +870,162 @@ export function SecretsPage() {
             {editor.mode === 'create'
               ? 'Check-and-set: this create only succeeds if the name is still unused (CAS 0).'
               : `Check-and-set: this save only succeeds if version ${editor.cas} is still current. If someone changes it first, you'll get a conflict instead of an overwrite.`}
-            {' '}Your token and the write are recorded in the audit log.
+            {' '}Values go to KV data; tags, comments and personal overrides go to KV custom metadata. Your token and the write are recorded in the audit log.
+            {!canWriteMeta && ' Your token cannot write metadata, so annotations will be skipped.'}
           </div>
+        </Dialog>
+      )}
+
+      {dialog === 'bulk' && editor && (
+        <Dialog
+          title="Bulk add fields"
+          onClose={() => setDialog(null)}
+          footer={
+            <>
+              <Button variant="outlined" onClick={() => setDialog(null)}>Cancel</Button>
+              <Button icon={<ClipboardPaste size={15} />} onClick={applyBulk}>Add fields</Button>
+            </>
+          }
+        >
+          <p className="small muted">
+            Paste spreadsheet rows, one per line: <code>KEY&lt;tab&gt;value</code>. Comma-separated rows work too.
+            Existing fields with the same name are replaced.
+          </p>
+          <div className="field">
+            <label htmlFor="bulk-text">Rows</label>
+            <textarea
+              id="bulk-text"
+              className="mono"
+              rows={8}
+              autoFocus
+              placeholder={'HOST\tpg.internal\nPORT\t5432'}
+              value={bulkText}
+              onChange={(event) => { setBulkText(event.target.value); setBulkError(null); }}
+            />
+          </div>
+          {bulkError && <div className="notice error small" role="alert">{bulkError}</div>}
+        </Dialog>
+      )}
+
+      {dialog === 'import' && editor && (
+        <Dialog
+          title="Import fields"
+          onClose={() => setDialog(null)}
+          footer={
+            <>
+              <Button variant="outlined" onClick={() => setDialog(null)}>Cancel</Button>
+              <Button icon={<Upload size={15} />} onClick={applyImport}>Import</Button>
+            </>
+          }
+        >
+          <div className="field-grid">
+            <div className="field">
+              <label htmlFor="import-format">Format</label>
+              <select id="import-format" value={importFormat} onChange={(event) => setImportFormat(event.target.value as ImportFormat)}>
+                <option value="env">.env</option>
+                <option value="json">JSON</option>
+                <option value="yaml">YAML</option>
+                <option value="tsv">TSV / pasted table</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="import-file">Or choose a file</label>
+              <input
+                id="import-file"
+                type="file"
+                accept=".env,.json,.yaml,.yml,.tsv,.txt"
+                onChange={async (event) => {
+                  const file = event.target.files?.[0];
+                  if (file) {
+                    setImportText(await file.text());
+                    setImportError(null);
+                  }
+                }}
+              />
+            </div>
+          </div>
+          <div className="check-row">
+            <input type="checkbox" checked={importMode === 'replace'} onChange={(event) => setImportMode(event.target.checked ? 'replace' : 'merge')} />
+            Replace all staged fields (otherwise imported names merge into the table)
+          </div>
+          <div className="field">
+            <label htmlFor="import-text">Paste content</label>
+            <textarea
+              id="import-text"
+              className="mono"
+              rows={9}
+              value={importText}
+              placeholder={importFormat === 'json' ? '{"KEY": "value"}' : 'KEY=value'}
+              onChange={(event) => { setImportText(event.target.value); setImportError(null); }}
+            />
+          </div>
+          {importError && <div className="notice error small" role="alert">{importError}</div>}
+          {!importError && importText.trim() && (
+            <p className="small muted">{Object.keys(parseKeyValueText(importText, importFormat).data).length} fields detected.</p>
+          )}
+        </Dialog>
+      )}
+
+      {dialog === 'export' && editor && (
+        <Dialog
+          title={`Export as ${exportFormat.toUpperCase()}`}
+          onClose={() => setDialog(null)}
+          footer={
+            <>
+              <Button variant="outlined" icon={<Download size={15} />} onClick={downloadExport}>Download</Button>
+              <CopyButton value={serializeKeyValue(dataFromRows(editor.rows), exportFormat)} label="Copy export" />
+            </>
+          }
+        >
+          <div className="field">
+            <label htmlFor="export-format">Format</label>
+            <select id="export-format" value={exportFormat} onChange={(event) => setExportFormat(event.target.value as ImportFormat)}>
+              <option value="env">.env</option>
+              <option value="json">JSON</option>
+              <option value="yaml">YAML</option>
+              <option value="tsv">TSV / spreadsheet</option>
+            </select>
+          </div>
+          <div className="notice warning small">
+            The preview contains real secret values. Copy or download it only into a trusted place.
+          </div>
+          <pre className="export-preview mono" data-testid="export-preview">{serializeKeyValue(dataFromRows(editor.rows), exportFormat)}</pre>
+        </Dialog>
+      )}
+
+      {dialog === 'source' && editor && (
+        <Dialog
+          title="Import values from another environment"
+          onClose={() => { setDialog(null); setSourceEnv(null); }}
+          footer={
+            <>
+              <Button variant="outlined" onClick={() => { setDialog(null); setSourceEnv(null); }}>Cancel</Button>
+              <Button icon={<ArrowRightLeft size={15} />} onClick={applySourceValues} disabled={!sourceQuery.data}>Stage values</Button>
+            </>
+          }
+        >
+          <p className="small muted">
+            Pull fields from <span className="mono">{project}/env/&lt;environment&gt;/{editor.name}</span> into this draft.
+            Nothing is written until you save.
+          </p>
+          <div className="env-switch" role="group" aria-label="Source environment">
+            {envs.filter((name) => name !== env).map((name) => (
+              <button key={name} aria-pressed={sourceEnv === name} onClick={() => setSourceEnv(name)}>{name}</button>
+            ))}
+          </div>
+          {sourceEnv && sourceQuery.isLoading && <div className="state"><div className="spinner" /></div>}
+          {sourceEnv && sourceQuery.isError && <div className="notice warning small">The source secret is not readable with this token.</div>}
+          {sourceQuery.data && (
+            <div className="grid">
+              {Object.entries(sourceQuery.data.data.data).map(([key, value]) => (
+                <div className="secret-field" key={key}>
+                  <span className="secret-field__key">{key}</span>
+                  <span className="secret-field__value masked">{mask(value)}</span>
+                  <span />
+                </div>
+              ))}
+            </div>
+          )}
         </Dialog>
       )}
     </div>

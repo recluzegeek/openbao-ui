@@ -123,6 +123,7 @@ export function capabilityPathsForFolder(project?: string, env?: string, folder 
     `${metaBase}/`,
     ...[...folders].map((name) => `${metaBase}/${name}/`),
     `${dataBase}/${folder}/__new__`,
+    `${metaBase}/${folder}/__new__`,
     ...allPaths.map((path) => `${dataBase}/${path}`),
     ...allPaths.map((path) => `${metaBase}/${path}`),
   ];

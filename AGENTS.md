@@ -8,7 +8,7 @@ semantic HTML, explicit `data-testid` hooks, and no hidden state.
 | Route | Purpose | Search params |
 | --- | --- | --- |
 | `/login` | token/userpass sign-in, sealed-server unseal | — |
-| `/secrets` | environment-aware KV browser | `project`, `env`, `service` |
+| `/secrets` | environment-aware KV browser | `project`, `env`, `service`, `folder` |
 | `/runbooks` | operational notes and related-secret links | `project` |
 | `/codes` | TOTP codes and admin actions | — |
 | `/automation` | capability inspector and command snippets | `path` (OpenBao API path) |
@@ -25,6 +25,7 @@ http://127.0.0.1:5173/secrets?project=ui-demo&env=staging&service=web
 kv/metadata/<project>/env/                       list environments
 kv/metadata/<project>/env/<env>/                 list services
 kv/data/<project>/env/<env>/<path>               read/write a secret (path may contain folders)
+kv/metadata/<project>/env/<env>/<path>           versions + custom_metadata (tags, comments, overrides)
 kv/metadata/<project>/env/<env>/<folder>/        list a folder (recursive traversal in bao.listSecretPaths)
 kv/data/<project>/creds/<name>                   shared credentials
 kv/data/_runbooks/<project>                      project runbook (steps, links, secrets)
@@ -40,9 +41,10 @@ The API facade is `src/lib/api.ts`. It prefixes `/v1/`, adds `X-Vault-Token` and
 
 All action buttons use `sys/capabilities-self` through `useCapabilities()`.
 `can(map, path, capability)` returns `false` when the map is not loaded, so the UI fails closed.
-When adding a new action, add its path to `capabilityPathsForSecret()`, `runbookCapabilityPaths()`
-or `totpCapabilityPaths()`. Secret creation is gated by the `kv/data/<project>/env/<env>/__new__`
-probe path; edits use the existing secret path.
+When adding a new action, add its path to `capabilityPathsForFolder()`, `capabilityPathsForSecret()`,
+`runbookCapabilityPaths()` or `totpCapabilityPaths()`. Secret creation is gated by the
+`kv/data/<project>/env/<env>/<folder>/__new__` probe path; edits use the existing secret path and
+metadata writes use the matching `kv/metadata/...` path.
 
 Writes use `bao.writeSecret()` with a **bare** API path (`<project>/env/<env>/<service>`) — that
 function adds the `kv/data/` prefix itself. Create passes CAS `0`; edit passes the current version.
@@ -50,7 +52,9 @@ function adds the `kv/data/` prefix itself. Create passes CAS `0`; edit passes t
 ## Useful test IDs
 
 - `field-<name>` — a secret field row
-- `edit-row-<name>` — a row in the secret editor dialog
+- `field-table` — the spreadsheet editor; `edit-row-<name>` — a draft field row
+- `edit-value-<name>` — a revealed, editable value cell
+- `export-preview` — the import/export dialog's value preview
 - `folder-<path>` — a folder in the secrets tree (`folder-root` for the root)
 - `secret-<path>` — a secret entry in the current folder
 - `compare-<env>-<key>` — a field cell in the side-by-side environment view

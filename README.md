@@ -29,10 +29,13 @@ The fork remains useful as a design reference; it is a poor base for a small, re
   shared credentials, version history, safe `.env` copy, and promotion with a destination preview.
 - **Environments side by side:** a compare panel shows the same secret path across dev/staging/prod
   in columns, with masked values, version stamps and clear "absent in this environment" markers.
-- **Secret create/edit with CAS:** add or edit a secret through a structured field editor. Creates
-  use check-and-set `0` (fails if the name is taken); edits use the current version as CAS, so a
-  concurrent change produces a conflict instead of a silent overwrite. Both actions are capability
-  gated and recorded in the audit log.
+- **Real secrets editor:** spreadsheet-style field table with inline edit, per-field reveal, copy,
+  multi-line values and one-click row removal. Bulk paste, `.env`/JSON/YAML/TSV import (file or
+  paste), matching export, and “from another environment” value staging are all available in the
+  draft before a single write happens. Tags, a secret note, per-field comments and **personal
+  overrides** live in KV v2 custom metadata. `${folder.KEY}` references are previewed against the
+  current environment without being rewritten. Creates use CAS `0`, edits use the current version
+  as CAS, and both are capability gated and recorded in the audit log.
 - **Runbooks:** operational notes from `_runbooks/<project>`, with numbered steps, owner/rotation,
   external links and one-click deep links back to the related secrets. Tolerates the original
   single-`steps`-string fixture as well as the richer structured shape.
@@ -105,11 +108,13 @@ OIDC tokens. Do not use the `ui-manager` password outside local development.
 
 ```
 src/
-  lib/            API facade, auth, capabilities, formatting, snippets, query hooks
+  lib/            API facade, auth, capabilities, formatting, snippets, query hooks,
+                  secret formats and metadata helpers
   components/     common primitives (from Dough) + app shell
   features/
     auth/         login + unseal
-    secrets/      env-aware KV, credentials, CAS editor, promotion, recent activity
+    secrets/      env-aware KV, credentials, spreadsheet editor, promotion,
+                  compare, recent activity
     runbooks/     operational notes with deep links to secrets
     totp/         one-time codes
     automation/   agent-facing commands and capability inspector

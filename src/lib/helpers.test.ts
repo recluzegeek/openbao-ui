@@ -7,6 +7,8 @@ import { dataFromRows, rowsFromData, validSecretName, validateRows } from './sec
 import { capabilityPathsForSecret } from './queries';
 import { actorLabel, operationLabel } from './audit';
 import { buildSecretTree, folderBreadcrumbs, folderInTree, validSecretPath } from './secretTree';
+import { buildReferenceLookup, findReferences, parseKeyValueText, resolveReferences, serializeKeyValue } from './secretFormats';
+import { effectiveValue, mergeAnnotations, overridesFor, parseAnnotations, withOverridesFor } from './secretMetadata';
 
 describe('OpenBao paths', () => {
   it('builds the POC KV layout', () => {
@@ -98,6 +100,83 @@ describe('audit trail', () => {
     expect(actorLabel({ time: '', displayName: 'root' })).toBe('root');
     expect(actorLabel({ time: '', policies: ['ui-demo-manager'] })).toBe('token (ui-demo-manager)');
     expect(actorLabel({ time: '' })).toBe('unknown token');
+  });
+});
+
+describe('secret formats', () => {
+  it('parses .env files with export, quotes and comments', () => {
+    const result = parseKeyValueText(
+      ['# generated', 'export API_KEY="abc 123"', 'EMPTY=', "RAW='single'", 'MISSING'].join('\n'),
+      'env',
+    );
+    expect(result.error).toMatch(/MISSING/);
+    expect(parseKeyValueText('export API_KEY="abc 123"\nEMPTY=\nRAW=\'single\'', 'env').data).toEqual({
+      API_KEY: 'abc 123',
+      EMPTY: '',
+      RAW: 'single',
+    });
+  });
+
+  it('flattens nested JSON and parses YAML block scalars', () => {
+    expect(parseKeyValueText('{"db":{"host":"pg"},"FLAG":true}', 'json').data).toEqual({
+      'db.host': 'pg',
+      FLAG: 'true',
+    });
+    expect(parseKeyValueText('KEY: value # note\nMULTI: |\n  line one\n  line two', 'yaml').data).toEqual({
+      KEY: 'value',
+      MULTI: 'line one\nline two',
+    });
+  });
+
+  it('parses pasted TSV/spreadsheet rows', () => {
+    expect(parseKeyValueText('HOST\tpg.internal\nPORT\t5432', 'tsv').data).toEqual({ HOST: 'pg.internal', PORT: '5432' });
+    expect(parseKeyValueText('HOST,pg.internal', 'tsv').data).toEqual({ HOST: 'pg.internal' });
+  });
+
+  it('round-trips values through export formats', () => {
+    const data = { HOST: 'pg.internal', MULTI: 'line one\nline two' };
+    expect(parseKeyValueText(serializeKeyValue(data, 'json'), 'json').data).toEqual(data);
+    expect(parseKeyValueText(serializeKeyValue(data, 'yaml'), 'yaml').data).toEqual(data);
+    expect(serializeKeyValue({ A: 'x y' }, 'env')).toBe('A="x y"');
+    expect(serializeKeyValue({ A: 'x y' }, 'tsv')).toBe('A\tx y');
+  });
+
+  it('finds and resolves ${path.FIELD} references', () => {
+    const value = '${database/postgres.HOST}:${database/postgres.PORT}';
+    const lookup = buildReferenceLookup([
+      { path: 'database/postgres', data: { HOST: 'pg.internal', PORT: 5432 } },
+    ]);
+    expect(findReferences(value)).toEqual(['database/postgres.HOST', 'database/postgres.PORT']);
+    expect(resolveReferences(value, lookup)).toBe('pg.internal:5432');
+    expect(resolveReferences('${missing.FIELD}', lookup)).toBe('${missing.FIELD}');
+  });
+});
+
+describe('secret annotations', () => {
+  it('round-trips tags, notes, comments and personal overrides', () => {
+    const annotations = parseAnnotations({
+      ui_tags: '["db","critical"]',
+      ui_note: 'Rotate weekly',
+      ui_comments: '{"PASSWORD":"ask the DBA"}',
+      ui_overrides: '{"ui-manager":{"PASSWORD":"local"}}',
+      rotation_notes: 'keep me',
+    });
+    expect(annotations.tags).toEqual(['db', 'critical']);
+    expect(annotations.comments.PASSWORD).toBe('ask the DBA');
+    expect(overridesFor(annotations, 'ui-manager')).toEqual({ PASSWORD: 'local' });
+
+    const written = mergeAnnotations({ rotation_notes: 'keep me' }, withOverridesFor(annotations, 'root', { HOST: 'mine' }));
+    expect(written.rotation_notes).toBe('keep me');
+    expect(parseAnnotations(written).overrides).toHaveProperty('ui-manager');
+    expect(parseAnnotations(written).overrides).toHaveProperty('root');
+    expect(effectiveValue('PASSWORD', 'stored', overridesFor(annotations, 'ui-manager'))).toBe('local');
+    expect(effectiveValue('HOST', 'stored', {})).toBe('stored');
+  });
+
+  it('ignores malformed metadata instead of crashing', () => {
+    expect(parseAnnotations({ ui_tags: 'not json', ui_comments: '[]' })).toEqual({
+      tags: [], note: '', comments: {}, overrides: {},
+    });
   });
 });
 
