@@ -4,7 +4,7 @@ import { Bot, Clock, KeyRound, TerminalSquare } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { useCapabilities } from '@/lib/queries';
 import { can } from '@/lib/capabilities';
-import { formatTtl } from '@/lib/format';
+import { tokenTtlLabel } from '@/lib/format';
 import { baoCliSnippet, curlSnippet, envPullSnippet, githubActionsSnippet } from '@/lib/snippets';
 import { Badge } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
@@ -46,7 +46,7 @@ export function AutomationPage() {
               <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.45rem 0.9rem', fontSize: '0.85rem' }}>
                 <dt className="muted">Identity</dt><dd style={{ margin: 0 }}>{auth.identity?.display_name || auth.identity?.name || '—'}</dd>
                 <dt className="muted">Entity</dt><dd className="mono small" style={{ margin: 0 }}>{auth.identity?.entity_id || '—'}</dd>
-                <dt className="muted">Expires in</dt><dd style={{ margin: 0 }}><Clock size={13} /> {formatTtl(auth.identity?.ttl)}</dd>
+                <dt className="muted">Session</dt><dd style={{ margin: 0 }}><Clock size={13} /> {tokenTtlLabel(auth.identity?.policies, auth.identity?.ttl, auth.identity?.expire_time)}</dd>
                 <dt className="muted">Namespace</dt><dd className="mono small" style={{ margin: 0 }}>{auth.namespace || 'root'}</dd>
                 <dt className="muted">Policies</dt>
                 <dd style={{ margin: 0, display: 'flex', gap: 4, flexWrap: 'wrap' }}>

@@ -138,20 +138,17 @@ export function CodesPage() {
 
   const visible = useMemo(() => {
     const needle = filter.toLowerCase();
-    return allAccounts.filter((account) => {
-      const parsed = parseTotpAccount(account);
-      return [account, parsed.account, parsed.project, issuer].some((value) => value.toLowerCase().includes(needle));
-    });
+    return allAccounts
+      .filter((account) => {
+        const parsed = parseTotpAccount(account);
+        return [account, parsed.account, parsed.project, issuer].some((value) => value.toLowerCase().includes(needle));
+      })
+      .sort((a, b) => {
+        const pa = parseTotpAccount(a);
+        const pb = parseTotpAccount(b);
+        return pa.project.localeCompare(pb.project) || pa.account.localeCompare(pb.account);
+      });
   }, [allAccounts, filter, issuer]);
-
-  const grouped = useMemo(() => {
-    const groups = new Map<string, string[]>();
-    for (const account of visible) {
-      const project = parseTotpAccount(account).project;
-      groups.set(project, [...(groups.get(project) ?? []), account]);
-    }
-    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [visible]);
 
   const canCreate = fullName ? can(caps, totpKeyPath(fullName), 'create') || can(caps, totpKeyPath(fullName), 'update') : false;
 
@@ -264,16 +261,16 @@ export function CodesPage() {
         </EmptyState>
       )}
 
-      {grouped.map(([project, names]) => (
-        <section key={project} className="grid" style={{ gap: '0.7rem' }}>
-          <div className="section-title">{project} · {names.length}</div>
+      {visible.length > 0 && (
+        <section className="grid" style={{ gap: '0.7rem' }}>
+          <div className="section-title">Accounts · {visible.length}</div>
           <div className="code-grid">
-            {names.map((account) => (
+            {visible.map((account) => (
               <CodeCard key={account} account={account} caps={caps} onDelete={setDeleteAccount} />
             ))}
           </div>
         </section>
-      ))}
+      )}
 
       {showAdd && (
         <Dialog

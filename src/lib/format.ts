@@ -23,6 +23,13 @@ export function formatTtl(seconds?: number): string {
   return `${Math.floor(seconds / 86400)}d`;
 }
 
+/** Root tokens and tokens with no expire_time never lapse; don't call them "expired". */
+export function tokenTtlLabel(policies: string[] | undefined, ttl: number | undefined, expireTime?: string | null): string {
+  if (policies?.includes('root')) return 'no expiry (root)';
+  if (!expireTime && (ttl === undefined || ttl === 0)) return 'no expiry';
+  return formatTtl(ttl);
+}
+
 export function secondsUntil(value?: string | number, now = Date.now()): number {
   if (value === undefined || value === null || value === '') return 0;
   // OpenBao's TOTP secrets engine returns a Unix timestamp in seconds.

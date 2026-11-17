@@ -9,6 +9,7 @@ semantic HTML, explicit `data-testid` hooks, and no hidden state.
 | --- | --- | --- |
 | `/login` | token/userpass sign-in, sealed-server unseal | — |
 | `/secrets` | environment-aware KV browser | `project`, `env`, `service` |
+| `/runbooks` | operational notes and related-secret links | `project` |
 | `/codes` | TOTP codes and admin actions | — |
 | `/automation` | capability inspector and command snippets | `path` (OpenBao API path) |
 
@@ -25,6 +26,7 @@ kv/metadata/<project>/env/                       list environments
 kv/metadata/<project>/env/<env>/                 list services
 kv/data/<project>/env/<env>/<service>            read/write a secret
 kv/data/<project>/creds/<name>                   shared credentials
+kv/data/_runbooks/<project>                      project runbook (steps, links, secrets)
 totp/keys/                                       list TOTP accounts
 totp/code/<project>--<account>                   read current code
 totp/keys/<project>--<account>                   account config / admin
@@ -37,13 +39,23 @@ The API facade is `src/lib/api.ts`. It prefixes `/v1/`, adds `X-Vault-Token` and
 
 All action buttons use `sys/capabilities-self` through `useCapabilities()`.
 `can(map, path, capability)` returns `false` when the map is not loaded, so the UI fails closed.
-When adding a new action, add its path to `capabilityPathsForSecret()` or `totpCapabilityPaths()`.
+When adding a new action, add its path to `capabilityPathsForSecret()`, `runbookCapabilityPaths()`
+or `totpCapabilityPaths()`. Secret creation is gated by the `kv/data/<project>/env/<env>/__new__`
+probe path; edits use the existing secret path.
+
+Writes use `bao.writeSecret()` with a **bare** API path (`<project>/env/<env>/<service>`) — that
+function adds the `kv/data/` prefix itself. Create passes CAS `0`; edit passes the current version.
 
 ## Useful test IDs
 
 - `field-<name>` — a secret field row
+- `edit-row-<name>` — a row in the secret editor dialog
 - `code-<account>` / `code-value-<account>` — TOTP card and value
 - copy buttons use `data-testid="copy-<label>"`
+
+The dev server also exposes `GET /api/audit?path=<api path>` (localhost only, dev build only) for the
+read-only "Recent activity" panel. It returns actor/operation/path/time from the local container's
+audit log and never includes secret values.
 
 ## Local fixtures
 

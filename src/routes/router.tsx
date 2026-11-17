@@ -5,6 +5,7 @@ import { LoginPage } from '@/features/auth/LoginPage';
 import { SecretsPage } from '@/features/secrets/SecretsPage';
 import { CodesPage } from '@/features/totp/CodesPage';
 import { AutomationPage } from '@/features/automation/AutomationPage';
+import { RunbooksPage } from '@/features/runbooks/RunbooksPage';
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
@@ -55,9 +56,18 @@ const automationRoute = createRoute({
   }),
 });
 
+const runbooksRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/runbooks',
+  component: RunbooksPage,
+  validateSearch: (search: Record<string, unknown>) => ({
+    project: typeof search.project === 'string' ? search.project : undefined,
+  }),
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
-  appRoute.addChildren([indexRoute, secretsRoute, codesRoute, automationRoute]),
+  appRoute.addChildren([indexRoute, secretsRoute, codesRoute, automationRoute, runbooksRoute]),
 ]);
 
 export const router = createRouter({

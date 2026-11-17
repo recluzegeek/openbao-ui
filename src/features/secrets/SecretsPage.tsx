@@ -3,6 +3,7 @@ import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowRightLeft,
+  BookOpen,
   Database,
   Eye,
   EyeOff,
@@ -11,13 +12,17 @@ import {
   History,
   KeyRound,
   Lock,
+  Pencil,
+  Plus,
   Search,
   TerminalSquare,
+  Trash2,
 } from 'lucide-react';
 import { bao, type CapabilitiesMap } from '@/lib/api';
 import { can, deniedReason } from '@/lib/capabilities';
 import { envRank, secretApiPath, secretPath } from '@/lib/baoPaths';
 import { envFile, formatWhen, mask } from '@/lib/format';
+import { dataFromRows, rowsFromData, validateRows, validSecretName, type FieldRow } from '@/lib/secretForm';
 import {
   capabilityPathsForSecret,
   useCapabilities,
@@ -33,6 +38,7 @@ import { useClipboard } from '@/lib/useClipboard';
 import { Badge } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
 import { CopyButton, Dialog, EmptyState, EnvBadge, ErrorState } from '@/components/common/Extras';
+import { RecentActivityPanel } from './RecentActivityPanel';
 
 type Search = Record<string, string | undefined>;
 
@@ -143,6 +149,15 @@ export function SecretsPage() {
   const [tab, setTab] = useState<'env' | 'creds'>('env');
   const [version, setVersion] = useState<number | undefined>(undefined);
   const [promoteTo, setPromoteTo] = useState<string | null>(null);
+  const [editor, setEditor] = useState<{
+    mode: 'create' | 'edit';
+    name: string;
+    rows: FieldRow[];
+    cas: number;
+  } | null>(null);
+  const [editorError, setEditorError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [revealValues, setRevealValues] = useState(false);
 
   useEffect(() => {
     if (!project && projects.data?.length) setProject(search.project ?? projects.data[0]);
@@ -173,12 +188,83 @@ export function SecretsPage() {
 
   const currentPath = project && env && service ? secretPath(project, env, service) : '';
   const apiPath = project && env && service ? secretApiPath(project, env, service) : '';
+  const newPath = project && env ? `kv/data/${project}/env/${env}/__new__` : '';
   const writable = can(caps, currentPath, 'update') || can(caps, currentPath, 'create');
+  const canCreate = can(caps, newPath, 'create') || can(caps, newPath, 'update');
   const filteredServices = (services.data ?? []).filter((name) => name.toLowerCase().includes(filter.toLowerCase()));
+
+  function updateRow(id: string, patch: Partial<FieldRow>) {
+    setEditor((current) => current && {
+      ...current,
+      rows: current.rows.map((row) => (row.id === id ? { ...row, ...patch } : row)),
+    });
+  }
+
+  function addRow() {
+    setEditor((current) => current && {
+      ...current,
+      rows: [...current.rows, { id: `new-${Date.now()}-${current.rows.length}`, key: '', value: '' }],
+    });
+  }
+
+  async function openCreate() {
+    setEditorError(null);
+    setEditor({ mode: 'create', name: '', rows: [{ id: 'new-0', key: '', value: '' }], cas: 0 });
+  }
+
+  async function openEdit() {
+    if (!project || !env || !service) return;
+    setEditorError(null);
+    try {
+      // Always edit the latest version, even if an older version is being viewed.
+      const latest = await bao.readSecret(secretApiPath(project, env, service));
+      setEditor({
+        mode: 'edit',
+        name: service,
+        rows: rowsFromData(latest.data.data),
+        cas: latest.data.metadata.version,
+      });
+    } catch (error) {
+      addToast('error', 'Could not load the secret', error instanceof Error ? error.message : undefined);
+    }
+  }
+
+  async function saveEditor() {
+    if (!project || !env || !editor) return;
+    const name = editor.name.trim();
+    if (!validSecretName(name)) {
+      setEditorError('Give the secret a name (a single path segment, without "/").');
+      return;
+    }
+    const invalid = validateRows(editor.rows);
+    if (invalid) {
+      setEditorError(invalid);
+      return;
+    }
+    setSaving(true);
+    setEditorError(null);
+    try {
+      // bao.writeSecret() adds the kv/data/ prefix, so pass the bare API path.
+      await bao.writeSecret(`${project}/env/${env}/${name}`, dataFromRows(editor.rows), editor.cas);
+      await queryClient.invalidateQueries();
+      addToast(
+        'success',
+        editor.mode === 'create' ? 'Secret created' : 'Secret saved',
+        `kv/data/${project}/env/${env}/${name} · version ${editor.cas + 1}`,
+      );
+      setService(name);
+      setVersion(undefined);
+      setEditor(null);
+    } catch (error) {
+      setEditorError(error instanceof Error ? error.message : 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function promote() {
     if (!project || !env || !service || !promoteTo || !secretQ.data) return;
-    const target = secretPath(project, promoteTo, service);
+    const target = secretApiPath(project, promoteTo, service);
     const data = secretQ.data.data.data;
     try {
       await bao.writeSecret(target, data);
@@ -198,6 +284,9 @@ export function SecretsPage() {
           <p>Pick a project and environment. Values are masked until you ask to see them.</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <Button variant="outlined" size="small" icon={<BookOpen size={15} />} onClick={() => void navigate({ to: '/runbooks', search: { project: project ?? undefined } })}>
+            Runbook
+          </Button>
           <Button variant="outlined" size="small" icon={<FileJson size={15} />} onClick={() => setTab('creds')}>
             Shared credentials
           </Button>
@@ -253,6 +342,16 @@ export function SecretsPage() {
               <FolderOpen size={17} />
               <h3>{service ? `${project}/env/${env}` : 'Services'}</h3>
               <Badge size="small">{filteredServices.length}</Badge>
+              <Button
+                size="small"
+                variant="outlined"
+                icon={<Plus size={14} />}
+                onClick={() => void openCreate()}
+                disabled={!canCreate}
+                title={canCreate ? 'Create a secret in this environment' : 'Your token cannot create secrets here'}
+              >
+                New secret
+              </Button>
             </div>
             {services.isLoading && <div className="state"><div className="spinner" /></div>}
             {services.isError && <ErrorState error={services.error} />}
@@ -301,6 +400,9 @@ export function SecretsPage() {
                       )}
                     </div>
                     <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '1rem' }}>
+                      <Button size="small" icon={<Pencil size={15} />} onClick={() => void openEdit()} disabled={!writable}>
+                        Edit
+                      </Button>
                       <Button size="small" variant="outlined" icon={<FileJson size={15} />} onClick={() => void copy(envFile(secretQ.data!.data.data), 'Shell-safe .env copied')}>
                         Copy .env
                       </Button>
@@ -335,6 +437,8 @@ export function SecretsPage() {
                   ))}
               </div>
             </div>
+
+            <RecentActivityPanel path={apiPath || undefined} />
           </div>
         </div>
       )}
@@ -357,6 +461,94 @@ export function SecretsPage() {
           <TargetPreview project={project} env={promoteTo} service={service} />
           <div className="notice warning small">
             The destination is written with your current token. Your audit log records the write.
+          </div>
+        </Dialog>
+      )}
+
+      {editor && project && env && (
+        <Dialog
+          title={editor.mode === 'create' ? `New secret in ${env}` : `Edit ${editor.name}`}
+          onClose={() => setEditor(null)}
+          footer={
+            <>
+              <Button variant="outlined" onClick={() => setEditor(null)} disabled={saving}>Cancel</Button>
+              <Button
+                icon={<Lock size={15} />}
+                onClick={() => void saveEditor()}
+                loading={saving}
+                disabled={saving}
+              >
+                {editor.mode === 'create' ? 'Create secret' : `Save version ${editor.cas + 1}`}
+              </Button>
+            </>
+          }
+        >
+          {editor.mode === 'create' ? (
+            <div className="field">
+              <label htmlFor="secret-name">Secret name</label>
+              <input
+                id="secret-name"
+                className="mono"
+                autoFocus
+                placeholder="e.g. web"
+                value={editor.name}
+                onChange={(event) => setEditor({ ...editor, name: event.target.value })}
+              />
+              <p className="small muted">Stored at <span className="mono">kv/data/{project}/env/{env}/&lt;name&gt;</span></p>
+            </div>
+          ) : (
+            <p className="small muted">
+              Editing <span className="mono">kv/data/{project}/env/{env}/{editor.name}</span>.
+            </p>
+          )}
+
+          <div className="divider" />
+
+          <div className="field-editor">
+            <div className="field-editor__head">
+              <span className="section-title">Fields</span>
+              <label className="check-row">
+                <input type="checkbox" checked={revealValues} onChange={(event) => setRevealValues(event.target.checked)} />
+                Show values
+              </label>
+            </div>
+            {editor.rows.map((row) => (
+              <div className="field-editor__row" key={row.id} data-testid={`edit-row-${row.key || 'new'}`}>
+                <input
+                  aria-label="Field name"
+                  className="mono"
+                  placeholder="FIELD_NAME"
+                  value={row.key}
+                  onChange={(event) => updateRow(row.id, { key: event.target.value })}
+                />
+                <input
+                  aria-label="Field value"
+                  className="mono"
+                  type={revealValues ? 'text' : 'password'}
+                  placeholder="value"
+                  value={row.value}
+                  onChange={(event) => updateRow(row.id, { value: event.target.value })}
+                />
+                <button
+                  className="icon-btn"
+                  aria-label={`Remove ${row.key || 'field'}`}
+                  title="Remove field"
+                  onClick={() => setEditor({ ...editor, rows: editor.rows.filter((item) => item.id !== row.id) })}
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            ))}
+            <Button size="small" variant="ghost" icon={<Plus size={14} />} onClick={addRow}>Add field</Button>
+          </div>
+
+          {editorError && <div className="notice error small" role="alert">{editorError}</div>}
+
+          <div className="notice small">
+            {editor.mode === 'create'
+              ? 'Check-and-set: this create only succeeds if the name is still unused (CAS 0).'
+              : `Check-and-set: this save only succeeds if version ${editor.cas} is still current. If someone changes it first, you'll get a conflict instead of an overwrite.`}
+            {' '}Your token and the write are recorded in the audit log.
           </div>
         </Dialog>
       )}

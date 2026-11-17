@@ -1,13 +1,14 @@
 import { useEffect } from 'react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { KeyRound, LogOut, Moon, Server, ShieldCheck, Sun, TerminalSquare } from 'lucide-react';
+import { BookOpen, KeyRound, LogOut, Moon, Server, ShieldCheck, Sun, TerminalSquare } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { useTheme } from '@/lib/useTheme';
-import { formatTtl } from '@/lib/format';
+import { tokenTtlLabel } from '@/lib/format';
 
 const links = [
   { to: '/secrets' as const, label: 'Secrets', icon: KeyRound },
+  { to: '/runbooks' as const, label: 'Runbooks', icon: BookOpen },
   { to: '/codes' as const, label: 'One-time codes', icon: ShieldCheck },
   { to: '/automation' as const, label: 'For agents', icon: TerminalSquare },
 ];
@@ -34,6 +35,7 @@ export function AppShell() {
 
   const displayName = auth.identity?.display_name || auth.identity?.name || 'Signed in';
   const policies = auth.identity?.policies ?? [];
+  const ttlLabel = tokenTtlLabel(policies, auth.identity?.ttl, auth.identity?.expire_time);
 
   return (
     <div className="app-shell">
@@ -67,7 +69,7 @@ export function AppShell() {
             <div className="identity-chip__meta">
               <div className="identity-chip__name" title={displayName}>{displayName}</div>
               <div className="identity-chip__sub">
-                {policies.length ? `${policies.length} polic${policies.length === 1 ? 'y' : 'ies'} · ${formatTtl(auth.identity?.ttl)} left` : 'token session'}
+                {policies.length ? `${policies.length} polic${policies.length === 1 ? 'y' : 'ies'} · ${ttlLabel}` : 'token session'}
               </div>
             </div>
             <button className="icon-btn" title="Sign out" aria-label="Sign out" onClick={() => void auth.logout()}>

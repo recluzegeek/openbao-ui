@@ -1,3 +1,5 @@
+import type { AuditResponse } from './audit';
+
 const KEYS = {
   address: 'console.bao.address',
   token: 'console.bao.token',
@@ -246,6 +248,11 @@ export const bao = {
     const res = await bao.list(`kv/metadata/${encodeURIComponent(project)}/creds/`);
     return cleanKeys(res.data?.keys).map((k) => k.replace(/\/$/, ''));
   },
+  listRunbooks: async () => {
+    const res = await bao.list('kv/metadata/_runbooks/');
+    return cleanKeys(res.data?.keys).map((k) => k.replace(/\/$/, ''));
+  },
+  readRunbook: (project: string) => bao.readSecret(`_runbooks/${encodeURIComponent(project)}`),
   readSecret: (path: string, version?: number) =>
     request<KVResponse>(`kv/data/${path}`, version ? { params: { version: String(version) } } : {}),
   readMetadata: (path: string) => request<KVMetadataResponse>(`kv/metadata/${path}`),
@@ -275,4 +282,12 @@ export const bao = {
     }),
   deleteTotpKey: (name: string) =>
     request<void>(`totp/keys/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+
+  /** Dev-only local audit view; this endpoint is served by the Vite middleware, not OpenBao. */
+  auditTrail: async (path: string): Promise<AuditResponse> => {
+    const response = await fetch(`/api/audit?path=${encodeURIComponent(path)}`, { headers: { Accept: 'application/json' } });
+    const body = await response.json().catch(() => ({})) as Partial<AuditResponse> & { error?: string };
+    if (!response.ok) throw new Error(body.error || `Audit request failed (${response.status})`);
+    return { available: true, entries: Array.isArray(body.entries) ? body.entries : [] };
+  },
 };

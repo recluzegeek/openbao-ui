@@ -76,9 +76,46 @@ export function capabilityPathsForSecret(project?: string, env?: string, service
   return [
     metadataPath(project),
     secretPath(project, env, service),
+    // Probe path for "New secret": ACL wildcards answer the same as a real new path.
+    `kv/data/${project}/env/${env}/__new__`,
     ...allEnvs.filter((e) => e !== env).map((e) => secretPath(project, e, service)),
     ...allEnvs.map((e) => `kv/metadata/${project}/env/${e}/`),
   ];
+}
+
+export function useRunbookProjects() {
+  return useQuery({
+    queryKey: ['runbook-projects'],
+    queryFn: () => bao.listRunbooks(),
+    staleTime: 60_000,
+  });
+}
+
+export function useRunbook(project?: string) {
+  return useQuery({
+    queryKey: ['runbook', project],
+    queryFn: () => bao.readRunbook(project!),
+    enabled: Boolean(project),
+    staleTime: 30_000,
+  });
+}
+
+export function runbookCapabilityPaths(projects: string[]) {
+  return [
+    'kv/metadata/_runbooks/',
+    ...projects.map((project) => `kv/data/_runbooks/${project}`),
+  ];
+}
+
+export function useAuditTrail(path?: string) {
+  return useQuery({
+    queryKey: ['audit-trail', path],
+    queryFn: () => bao.auditTrail(path!),
+    enabled: Boolean(path),
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+    retry: false,
+  });
 }
 
 export function useTotpAccounts() {

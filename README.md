@@ -12,8 +12,8 @@ standard OpenBao HTTP API, so every action a human takes here has an equivalent 
 | Criterion | Adfinis fork | Fresh Vite (this repo) |
 | --- | --- | --- |
 | Build tooling | Rsbuild + generated 500 KB API client | Vite, tiny typed API facade |
-| Route coverage | Mostly stubs / 404s | Only the three first-slice surfaces |
-| Architecture | No spec, many aspirational routes | One layout, three features, explicit paths |
+| Route coverage | Mostly stubs / 404s | A small set of working, deep-linkable surfaces |
+| Architecture | No spec, many aspirational routes | One layout, focused features, explicit paths |
 | Onboarding for new contributors | Must learn generated client + aliases | Standard Vite/React/TS |
 | Look and feel | Good tokens/components | Reused tokens + primitives |
 
@@ -26,6 +26,13 @@ The fork remains useful as a design reference; it is a poor base for a small, re
 - **Secrets:** project → environment → service browsing, masked-by-default field reveal/copy,
   shared credentials, version history, safe `.env` copy, and promotion between environments with a
   destination preview and confirmation.
+- **Secret create/edit with CAS:** add or edit a secret through a structured field editor. Creates
+  use check-and-set `0` (fails if the name is taken); edits use the current version as CAS, so a
+  concurrent change produces a conflict instead of a silent overwrite. Both actions are capability
+  gated and recorded in the audit log.
+- **Runbooks:** operational notes from `_runbooks/<project>`, with numbered steps, owner/rotation,
+  external links and one-click deep links back to the related secrets. Tolerates the original
+  single-`steps`-string fixture as well as the richer structured shape.
 - **One-time codes (TOTP):** live codes with countdown, copy, admin create/delete; the seed is
   generated inside OpenBao and never displayed. If your token may read individual codes but cannot
   list every account (typical for managers), the page offers an **“Open a code by name”** panel:
@@ -33,8 +40,11 @@ The fork remains useful as a design reference; it is a poor base for a small, re
   Pinned names live in this browser tab only; codes are never stored.
 - **For agents:** identity and policy summary, capability inspection for any path, and copyable
   CLI/cURL/`.env`/GitHub Actions snippets that never contain secret values.
+- **Recent activity:** a non-blocking "who changed this" panel on each secret, built from OpenBao's
+  audit log. It shows actor, operation, path and time — never secret values — and degrades quietly
+  when the log is unavailable.
 - **Permission-aware UI:** capabilities are fetched from `sys/capabilities-self`; unreadable
-  environments, write actions and TOTP admin actions are disabled with a real explanation.
+  environments, write actions, runbooks and TOTP admin actions are disabled with a real explanation.
 - **Deep links:** every important view has stable query parameters (see `AGENTS.md`).
 
 ## Run locally
@@ -59,8 +69,12 @@ pnpm dev
 Open <http://127.0.0.1:5173>.
 
 The dev server proxies `/v1/*` to `http://127.0.0.1:8200`, so no CORS changes are needed locally.
-Override the proxy target with `VITE_BAO_TARGET=http://host:8200 pnpm dev`. A production build has no
-proxy: point the console at an OpenBao address that allows the console origin in its CORS config.
+Override the proxy target with `VITE_BAO_TARGET=http://host:8200 pnpm dev`. It also exposes a
+**dev-only** `/api/audit?path=...` bridge that reads the last 4,000 lines of the local container's
+audit log through `podman exec` (or `docker exec`) and returns only actor/operation/path/time. Set
+`VITE_BAO_CONTAINER` if the container is not named `openbao-poc`. This endpoint is never included in
+a production build; do not expose it outside localhost. A production build has no proxy: point the
+console at an OpenBao address that allows the console origin in its CORS config.
 
 Sign in with either:
 
@@ -78,7 +92,8 @@ live code — copying works, while delete and create stay disabled with a clear 
 - Secrets are masked by default; reveal state is component-local and never persisted.
 - Secret values are never put in URLs, generated commands, or console logs.
 - `.env` copy is an explicit user action and uses shell-safe quoting.
-- The frontend is a static build; no backend proxy stores or forwards tokens.
+- The frontend is a static build; no backend proxy stores or forwards tokens. The local audit bridge
+  returns metadata only and is served solely by the dev server on `127.0.0.1`.
 
 For real deployments, terminate TLS in front of OpenBao, set CORS explicitly, and use short-lived
 OIDC tokens. Do not use the `ui-manager` password outside local development.
@@ -91,7 +106,8 @@ src/
   components/     common primitives (from Dough) + app shell
   features/
     auth/         login + unseal
-    secrets/      env-aware KV, credentials, promotion
+    secrets/      env-aware KV, credentials, CAS editor, promotion, recent activity
+    runbooks/     operational notes with deep links to secrets
     totp/         one-time codes
     automation/   agent-facing commands and capability inspector
   routes/         TanStack Router route tree
@@ -109,14 +125,13 @@ pnpm build
 
 ## Deliberately out of scope for this slice
 
-OIDC login callback, policy/identity/OIDC-provider editors, mounts/plugins/audit/raft settings,
-secret editing in the browser (read + promote only), namespaces management, i18n, and a formal
-component-library package. These belong in later slices, driven by real usage.
+OIDC login callback, policy/identity/OIDC-provider editors, mounts/plugins/raft settings,
+namespaces management, i18n, and a formal component-library package. These belong in later slices,
+driven by real usage. Audit is represented only by the read-only recent-activity panel above.
 
 ## Roadmap candidates
 
 1. OIDC login with callback + role selection — unblocks managers in OIDC-based teams.
-2. Secret create/edit with CAS and a structured form, gated by capabilities.
-3. Runbooks view (`kv/_runbooks/*`) linked from each service.
-4. Audit-aware "who changed this" panel using the existing audit log.
-5. Component extraction into a small shared package if another community UI wants to reuse it.
+2. A proper audit settings/explorer view (the current panel is a local, read-only slice).
+3. Secret deletion and version rollback with explicit confirmation and capability gating.
+4. Component extraction into a small shared package if another community UI wants to reuse it.

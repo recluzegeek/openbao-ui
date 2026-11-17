@@ -38,7 +38,27 @@ done
 api POST kv/data/ui-demo/env/development/web "$(jq -nc '{data:{APP_NAME:"console-demo",LOG_LEVEL:"trace",FEATURE_BANNER:"true",DATABASE_URL:"postgres://db.internal:5432/app",API_BASE_URL:"https://api.development.example.com",DEBUG_EXTRA:"only-in-v2"}}')"
 
 api POST kv/data/ui-demo/creds/example-console "$(jq -nc '{data:{username:"demo-user",password:"demo-only-password",url:"https://console.example.com"}}')"
-api POST kv/data/_runbooks/ui-demo "$(jq -nc '{data:{steps:"Rotate demo credentials quarterly; promote dev -> staging -> production."}}')"
+api POST kv/data/_runbooks/ui-demo "$(jq -nc '{
+  data: {
+    title: "ui-demo rotation & promotion",
+    summary: "Safe order of operations for the demo credentials and environment promotion.",
+    owner: "Platform team",
+    rotation: "Quarterly",
+    steps: [
+      "Open the development web secret and note the current version in the version history.",
+      "Rotate the shared credential, then update the username and password fields in development.",
+      "Read a fresh one-time code from the example console account to confirm the credential works.",
+      "Promote development to staging, verify, then promote staging to production.",
+      "Review the recent activity panel to confirm who made each change."
+    ],
+    links: [{label:"OpenBao UI",url:"http://127.0.0.1:8200/ui"}],
+    secrets: [
+      {project:"ui-demo",env:"development",service:"web",label:"development · web"},
+      {project:"ui-demo",env:"staging",service:"web",label:"staging · web"},
+      {project:"ui-demo",env:"production",service:"web",label:"production · web"}
+    ]
+  }
+}')"
 
 # TOTP shared account: seed is generated inside OpenBao and cannot be read back.
 if [ "$(status totp/keys/ui-demo--example-console)" != 200 ]; then
