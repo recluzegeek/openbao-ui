@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { BookOpen, KeyRound, LogOut, Moon, Search, Server, Shield, ShieldCheck, Sun, TerminalSquare } from 'lucide-react';
+import { Activity, BookOpen, KeyRound, LogOut, Moon, Search, Server, Shield, ShieldCheck, Sun, TerminalSquare } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { useTheme } from '@/lib/useTheme';
 import { tokenTtlLabel } from '@/lib/format';
@@ -13,6 +13,7 @@ const links = [
   { to: '/runbooks' as const, label: 'Runbooks', icon: BookOpen },
   { to: '/codes' as const, label: 'One-time codes', icon: ShieldCheck },
   { to: '/access' as const, label: 'Access control', icon: Shield },
+  { to: '/audit' as const, label: 'Audit log', icon: Activity },
   { to: '/automation' as const, label: 'For agents', icon: TerminalSquare },
 ];
 

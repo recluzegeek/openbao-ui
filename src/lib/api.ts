@@ -370,8 +370,9 @@ export const bao = {
   },
 
   /** Dev-only local audit view; this endpoint is served by the Vite middleware, not OpenBao. */
-  auditTrail: async (path: string): Promise<AuditResponse> => {
-    const response = await fetch(`/api/audit?path=${encodeURIComponent(path)}`, { headers: { Accept: 'application/json' } });
+  auditTrail: async (path = '', limit = 10): Promise<AuditResponse> => {
+    const query = new URLSearchParams({ path, limit: String(limit) });
+    const response = await fetch(`/api/audit?${query}`, { headers: { Accept: 'application/json' } });
     const body = await response.json().catch(() => ({})) as Partial<AuditResponse> & { error?: string };
     if (!response.ok) throw new Error(body.error || `Audit request failed (${response.status})`);
     return { available: true, entries: Array.isArray(body.entries) ? body.entries : [] };

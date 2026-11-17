@@ -13,6 +13,7 @@ semantic HTML, explicit `data-testid` hooks, and no hidden state.
 | `/runbooks` | operational notes and related-secret links | `project` |
 | `/codes` | TOTP codes and admin actions | — |
 | `/access` | visual access control: roles, policy builder, simulator, machine identities | `view`, `project`, `env` |
+| `/audit` | full audit-log viewer with search and filters | `q`, `actor`, `operation`, `range` |
 | `/automation` | capability inspector and command snippets | `path` (OpenBao API path) |
 
 Example deep link:
@@ -75,11 +76,13 @@ function adds the `kv/data/` prefix itself. Create passes CAS `0`; edit passes t
 - `policy-rules` / `policy-rule-<n>` / `save-policy` — visual policy builder
 - `simulator-run` / `simulator-result-<path>` — capability simulator and its result rows
 - `identity-kind-<kind>` / `identity-snippet-cli` / `identity-snippet-http` — machine-identity wizard
+- `audit-search` / `audit-actor` / `audit-operation` / `audit-range` — audit filters; `audit-table` / `audit-entry-<n>` — results
 - copy buttons use `data-testid="copy-<label>"`
 
-The dev server also exposes `GET /api/audit?path=<api path>` (localhost only, dev build only) for the
-read-only "Recent activity" panel. It returns actor/operation/path/time from the local container's
-audit log and never includes secret values.
+The dev server also exposes `GET /api/audit?path=<api path>&limit=<n>` (localhost only, dev build
+only) for the "Recent activity" panel and the full `/audit` viewer. It returns
+actor/operation/path/time/result from the local container's audit log, capped at 2000 entries, and
+never includes secret values.
 
 ## Local fixtures
 

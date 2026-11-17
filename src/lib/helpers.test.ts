@@ -5,7 +5,7 @@ import { envFile, formatTtl, parsePeriod, secondsUntil, shellQuote, tokenTtlLabe
 import { baoCliSnippet, curlSnippet } from './snippets';
 import { dataFromRows, rowsFromData, validSecretName, validateRows } from './secretForm';
 import { capabilityPathsForSecret } from './queries';
-import { actorLabel, operationLabel } from './audit';
+import { actorLabel, auditCsv, auditPathHref, filterAuditEntries, operationLabel, type AuditEntry, type AuditFilters } from './audit';
 import { buildSecretTree, folderBreadcrumbs, folderInTree, validSecretPath } from './secretTree';
 import { buildReferenceLookup, findReferences, parseKeyValueText, resolveReferences, serializeKeyValue } from './secretFormats';
 import { effectiveValue, mergeAnnotations, overridesFor, parseAnnotations, withOverridesFor } from './secretMetadata';
@@ -110,6 +110,39 @@ describe('audit trail', () => {
     expect(actorLabel({ time: '', displayName: 'root' })).toBe('root');
     expect(actorLabel({ time: '', policies: ['ui-demo-manager'] })).toBe('token (ui-demo-manager)');
     expect(actorLabel({ time: '' })).toBe('unknown token');
+  });
+
+  it('filters audit entries by actor, action, path text and time range', () => {
+    const now = Date.parse('2026-01-01T12:00:00Z');
+    const entries: AuditEntry[] = [
+      { time: '2026-01-01T11:55:00Z', operation: 'update', path: 'kv/data/ui-demo/env/development/web', displayName: 'root' },
+      { time: '2026-01-01T10:00:00Z', operation: 'read', path: 'kv/data/ui-demo/env/production/web', displayName: 'ui-manager' },
+      { time: '2025-12-30T10:00:00Z', operation: 'delete', path: 'kv/data/other/env/dev/web', displayName: 'root' },
+    ];
+    const base: AuditFilters = { search: '', actor: 'all', operation: 'all', range: 'all' };
+    expect(filterAuditEntries(entries, base, now)).toHaveLength(3);
+    expect(filterAuditEntries(entries, { ...base, actor: 'root' }, now)).toHaveLength(2);
+    expect(filterAuditEntries(entries, { ...base, operation: 'read' }, now)).toHaveLength(1);
+    expect(filterAuditEntries(entries, { ...base, search: 'production/web' }, now).map((e) => e.displayName)).toEqual(['ui-manager']);
+    expect(filterAuditEntries(entries, { ...base, range: '1h' }, now)).toHaveLength(1);
+    expect(filterAuditEntries(entries, { ...base, range: '24h' }, now)).toHaveLength(2);
+  });
+
+  it('exports metadata-only CSV with escaped cells', () => {
+    const csv = auditCsv([{ time: 't', operation: 'update', path: 'a,"b"', displayName: 'dev', allowed: false }]);
+    expect(csv.split('\n')[0]).toBe('time,actor,operation,path,result');
+    expect(csv).toContain('"a,""b"""');
+    expect(csv).toContain('"denied"');
+    expect(csv).not.toMatch(/password|value=/i);
+  });
+
+  it('links audit paths back to the secrets browser without leaking values', () => {
+    expect(auditPathHref('kv/data/ui-demo/env/development/web')).toBe('/secrets?project=ui-demo&env=development&service=web');
+    expect(auditPathHref('kv/data/ui-demo/env/staging/database/postgres')).toBe(
+      '/secrets?project=ui-demo&env=staging&service=database%2Fpostgres&folder=database',
+    );
+    expect(auditPathHref('sys/policies/acl/ui-demo-viewer')).toBeNull();
+    expect(auditPathHref(undefined)).toBeNull();
   });
 });
 

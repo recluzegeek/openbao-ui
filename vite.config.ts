@@ -50,6 +50,8 @@ function devAuditLog(): Plugin {
       server.middlewares.use('/api/audit', async (req, res) => {
         const url = new URL(req.url ?? '/', 'http://localhost');
         const filter = (url.searchParams.get('path') ?? '').trim();
+        const requested = Number.parseInt(url.searchParams.get('limit') ?? '10', 10);
+        const limit = Math.min(Number.isFinite(requested) ? Math.max(requested, 1) : 10, 2000);
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Cache-Control', 'no-store');
 
@@ -84,7 +86,7 @@ function devAuditLog(): Plugin {
                 allowed: typeof row.auth?.policy_results?.allowed === 'boolean' ? row.auth.policy_results.allowed : undefined,
               }];
             })
-            .slice(-10)
+            .slice(-limit)
             .reverse();
           res.end(JSON.stringify({ available: true, entries }));
         } catch (error) {

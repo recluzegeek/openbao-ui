@@ -8,6 +8,7 @@ import { AutomationPage } from '@/features/automation/AutomationPage';
 import { RunbooksPage } from '@/features/runbooks/RunbooksPage';
 import { SearchPage } from '@/features/search/SearchPage';
 import { AccessPage } from '@/features/access/AccessPage';
+import { AuditPage } from '@/features/audit/AuditPage';
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
@@ -77,6 +78,18 @@ const runbooksRoute = createRoute({
   }),
 });
 
+const auditRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/audit',
+  component: AuditPage,
+  validateSearch: (search: Record<string, unknown>) => ({
+    q: typeof search.q === 'string' ? search.q : undefined,
+    actor: typeof search.actor === 'string' ? search.actor : undefined,
+    operation: typeof search.operation === 'string' ? search.operation : undefined,
+    range: typeof search.range === 'string' ? search.range : undefined,
+  }),
+});
+
 const accessRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/access',
@@ -90,7 +103,7 @@ const accessRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
-  appRoute.addChildren([indexRoute, secretsRoute, searchRoute, codesRoute, automationRoute, runbooksRoute, accessRoute]),
+  appRoute.addChildren([indexRoute, secretsRoute, searchRoute, codesRoute, automationRoute, runbooksRoute, accessRoute, auditRoute]),
 ]);
 
 export const router = createRouter({

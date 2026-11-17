@@ -63,9 +63,11 @@ The fork remains useful as a design reference; it is a poor base for a small, re
   one. No simulation token value is shown or stored. The **machine identities** tab generates
   AppRole, Kubernetes, JWT/OIDC and cloud-IAM setup commands for a chosen set of policies — without
   embedding credentials or secret values.
-- **Recent activity:** a non-blocking "who changed this" panel on each secret, built from OpenBao's
-  audit log. It shows actor, operation, path and time — never secret values — and degrades quietly
-  when the log is unavailable.
+- **Audit log viewer:** `/audit` searches and filters the local OpenBao audit trail by actor, action,
+  path text and time range, with deep links back to the affected secret and a metadata-only CSV copy
+  button. Only actor/operation/path/time/result are read from the log — never secret values.
+- **Recent activity:** a non-blocking "who changed this" panel on each secret, built from the same
+  audit bridge. It degrades quietly when the local log is unavailable.
 - **Permission-aware UI:** capabilities are fetched from `sys/capabilities-self`; unreadable
   environments, write actions, runbooks and TOTP admin actions are disabled with a real explanation.
 - **Deep links:** every important view has stable query parameters (see `AGENTS.md`).

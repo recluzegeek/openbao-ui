@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { ArrowRight, Clock3, CornerDownLeft, KeyRound, Search, Star } from 'lucide-react';
+import { Activity, ArrowRight, Clock3, CornerDownLeft, KeyRound, Search, Shield, Star } from 'lucide-react';
 import { folderOf, loadFavorites, loadRecent, type SecretRef } from '@/lib/navigationMemory';
 
 interface Action {
@@ -66,6 +66,20 @@ export function CommandPalette() {
         group: 'Go to',
         icon: <Search size={16} />,
         run: () => void navigate({ to: '/search', search: { q: undefined } }),
+      },
+      {
+        id: 'route-access',
+        label: 'Access control',
+        group: 'Go to',
+        icon: <Shield size={16} />,
+        run: () => void navigate({ to: '/access', search: { view: undefined, project: undefined, env: undefined } }),
+      },
+      {
+        id: 'route-audit',
+        label: 'Audit log',
+        group: 'Go to',
+        icon: <Activity size={16} />,
+        run: () => void navigate({ to: '/audit', search: { q: undefined, actor: undefined, operation: undefined, range: undefined } }),
       },
     ];
     const recentActions: Action[] = loadRecent().map((ref) => ({

@@ -147,6 +147,17 @@ export function useAuditTrail(path?: string) {
   });
 }
 
+/** Larger metadata-only window for the full audit viewer. */
+export function useAuditLog(limit = 500) {
+  return useQuery({
+    queryKey: ['audit-log', limit],
+    queryFn: () => bao.auditTrail('', limit),
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+    retry: false,
+  });
+}
+
 export function useTotpAccounts() {
   return useQuery({
     queryKey: ['totp-accounts'],
