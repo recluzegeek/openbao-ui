@@ -16,6 +16,19 @@ export function useProjects() {
   });
 }
 
+/** Lightweight server-state probes used by the getting-started guide. */
+export function useSetupHealth() {
+  return useQuery({ queryKey: ['setup-health'], queryFn: () => bao.health(), retry: false, staleTime: 10_000 });
+}
+
+export function useSetupSeal() {
+  return useQuery({ queryKey: ['setup-seal'], queryFn: () => bao.sealStatus(), retry: false, staleTime: 10_000 });
+}
+
+export function useKvMount() {
+  return useQuery({ queryKey: ['setup-kv-mount'], queryFn: () => bao.hasKvMount(), retry: false, staleTime: 60_000 });
+}
+
 export function useEnvironments(project?: string) {
   return useQuery({
     queryKey: ['environments', project],

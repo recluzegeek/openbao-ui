@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { Activity, ArrowRight, Clock3, CornerDownLeft, KeyRound, Search, Shield, Star } from 'lucide-react';
+import { Activity, ArrowRight, Clock3, Compass, CornerDownLeft, KeyRound, Search, Shield, Star } from 'lucide-react';
 import { folderOf, loadFavorites, loadRecent, type SecretRef } from '@/lib/navigationMemory';
 
 interface Action {
@@ -53,6 +53,13 @@ export function CommandPalette() {
       });
     };
     const routeActions: Action[] = [
+      {
+        id: 'route-welcome',
+        label: 'Getting started',
+        group: 'Go to',
+        icon: <Compass size={16} />,
+        run: () => void navigate({ to: '/welcome' }),
+      },
       {
         id: 'route-secrets',
         label: 'Secrets',

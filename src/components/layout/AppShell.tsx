@@ -1,13 +1,15 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Activity, BookOpen, KeyRound, LogOut, Moon, Search, Server, Shield, ShieldCheck, Sun, TerminalSquare } from 'lucide-react';
+import { Activity, BookOpen, Compass, KeyRound, Keyboard, LogOut, Moon, Search, Server, Shield, ShieldCheck, Sun, TerminalSquare } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { useTheme } from '@/lib/useTheme';
 import { tokenTtlLabel } from '@/lib/format';
 import { CommandPalette } from './CommandPalette';
+import { ShortcutsDialog } from './ShortcutsDialog';
 
 const links = [
+  { to: '/welcome' as const, label: 'Getting started', icon: Compass },
   { to: '/secrets' as const, label: 'Secrets', icon: KeyRound },
   { to: '/search' as const, label: 'Search', icon: Search },
   { to: '/runbooks' as const, label: 'Runbooks', icon: BookOpen },
@@ -23,10 +25,47 @@ export function AppShell() {
   const { theme, toggle } = useTheme();
   const queryClient = useQueryClient();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   useEffect(() => {
     if (auth.status === 'anonymous') void navigate({ to: '/login', replace: true });
   }, [auth.status, navigate]);
+
+  // Global keyboard shortcuts. Typing in a field takes priority so secret values
+  // are never intercepted, and ⌘K stays owned by the command palette.
+  useEffect(() => {
+    const jump: Array<() => void> = [
+      () => void navigate({ to: '/welcome' }),
+      () => void navigate({ to: '/secrets', search: { project: undefined, env: undefined, service: undefined, folder: undefined } }),
+      () => void navigate({ to: '/search', search: { q: undefined } }),
+      () => void navigate({ to: '/runbooks', search: { project: undefined } }),
+      () => void navigate({ to: '/codes' }),
+      () => void navigate({ to: '/access', search: { view: undefined, project: undefined, env: undefined } }),
+      () => void navigate({ to: '/audit', search: { q: undefined, actor: undefined, operation: undefined, range: undefined } }),
+      () => void navigate({ to: '/automation', search: { path: undefined } }),
+    ];
+    const handler = (event: KeyboardEvent) => {
+      if (event.altKey && !event.ctrlKey && !event.metaKey && /^[1-8]$/.test(event.key)) {
+        event.preventDefault();
+        jump[Number(event.key) - 1]();
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      const typing = Boolean(target && (
+        target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable
+      ));
+      if (typing || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.key === '?') {
+        event.preventDefault();
+        setShortcutsOpen(true);
+      } else if (event.key === '/') {
+        event.preventDefault();
+        window.dispatchEvent(new Event('console:open-palette'));
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [navigate]);
 
   if (auth.status !== 'authenticated') {
     return (
@@ -43,6 +82,7 @@ export function AppShell() {
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <aside className="sidebar" aria-label="Main navigation">
         <div className="brand">
           <div className="brand__mark" aria-hidden="true">B</div>
@@ -98,6 +138,15 @@ export function AppShell() {
             >
               <Search size={15} /> <span>Search</span> <kbd>⌘K</kbd>
             </button>
+            <button
+              className="icon-btn"
+              onClick={() => setShortcutsOpen(true)}
+              aria-label="Keyboard shortcuts"
+              title="Keyboard shortcuts (?)"
+              data-testid="shortcuts-open"
+            >
+              <Keyboard size={17} />
+            </button>
             <label className="small muted" htmlFor="namespace">Namespace</label>
             <input
               id="namespace"
@@ -115,9 +164,10 @@ export function AppShell() {
             </button>
           </div>
         </header>
-        <main className="page"><Outlet /></main>
+        <main className="page" id="main-content" tabIndex={-1}><Outlet /></main>
       </div>
       <CommandPalette />
+      {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
     </div>
   );
 }

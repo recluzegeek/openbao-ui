@@ -23,6 +23,11 @@ The fork remains useful as a design reference; it is a poor base for a small, re
 
 - **Sign in:** token or userpass against any OpenBao address/namespace; sealed-server unseal flow.
   OIDC is visibly deferred rather than faked.
+- **Getting started:** `/welcome` is a checklist that follows the *real* server state — connected,
+  initialized/unsealed, KV engine mounted, first project created — and offers copyable operator
+  commands for each step. Those commands never contain secret values: `operator init` output is
+  never shown or stored. A dismissible first-run banner links to the guide from the secrets browser;
+  the guide stays in the sidebar so you can reopen it.
 - **Secrets:** project → environment → **folder** → secret browsing, with a folder tree,
   breadcrumbs and deep links. Folders are path segments under `kv/data/<project>/env/<env>/`; the
   original flat secrets (`web`, `billing`) remain at the root. Masked-by-default field reveal/copy,
@@ -70,6 +75,12 @@ The fork remains useful as a design reference; it is a poor base for a small, re
   audit bridge. It degrades quietly when the local log is unavailable.
 - **Permission-aware UI:** capabilities are fetched from `sys/capabilities-self`; unreadable
   environments, write actions, runbooks and TOTP admin actions are disabled with a real explanation.
+- **Keyboard-first:** `⌘K`/`Ctrl+K` opens the command palette, `Alt+1`–`Alt+8` jump to sidebar
+  sections, `/` opens search, `?` shows the shortcut help, and `Esc` closes overlays. Shortcuts pause
+  while you type in a field. Dark mode follows the OS preference and can be toggled in the topbar.
+- **Accessible and responsive:** semantic navigation and dialogs, a skip link, visible focus rings,
+  `aria` labels on actions, a `prefers-reduced-motion` rule, and a layout that collapses cleanly to a
+  single column on narrow screens.
 - **Deep links:** every important view has stable query parameters (see `AGENTS.md`).
 
 ## Run locally
@@ -132,10 +143,14 @@ src/
   components/     common primitives (from Dough) + app shell
   features/
     auth/         login + unseal
+    onboarding/   getting-started checklist and first-run banner
     secrets/      env-aware KV, credentials, spreadsheet editor, promotion,
                   compare, recent activity
     runbooks/     operational notes with deep links to secrets
     totp/         one-time codes
+    search/       global search, recents and favorites
+    access/       role templates, policy builder, simulator, machine identities
+    audit/        full audit-log viewer
     automation/   agent-facing commands and capability inspector
   routes/         TanStack Router route tree
   styles/         Dough tokens/themes + console layout CSS
@@ -152,9 +167,10 @@ pnpm build
 
 ## Deliberately out of scope for this slice
 
-OIDC login callback, policy/identity/OIDC-provider editors, mounts/plugins/raft settings,
-namespaces management, i18n, and a formal component-library package. These belong in later slices,
-driven by real usage. Audit is represented only by the read-only recent-activity panel above.
+OIDC login callback, OIDC-provider editors, mounts/plugins/raft settings, namespaces management,
+i18n, and a formal component-library package. These belong in later slices, driven by real usage.
+Audit is read-only: a per-secret activity panel and the full `/audit` viewer, both fed by the local
+metadata-only dev bridge.
 
 ## Roadmap candidates
 

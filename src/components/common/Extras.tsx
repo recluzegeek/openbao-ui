@@ -65,7 +65,7 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
   );
 }
 
-export function Dialog({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
+export function Dialog({ title, onClose, children, footer, testId }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; testId?: string }) {
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -76,7 +76,7 @@ export function Dialog({ title, onClose, children, footer }: { title: string; on
 
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="dialog" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="dialog" role="dialog" aria-modal="true" aria-label={title} data-testid={testId}>
         <div className="dialog__head">
           <h2>{title}</h2>
           <button className="icon-btn" onClick={onClose} aria-label="Close dialog">

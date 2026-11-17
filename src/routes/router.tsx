@@ -9,6 +9,7 @@ import { RunbooksPage } from '@/features/runbooks/RunbooksPage';
 import { SearchPage } from '@/features/search/SearchPage';
 import { AccessPage } from '@/features/access/AccessPage';
 import { AuditPage } from '@/features/audit/AuditPage';
+import { WelcomePage } from '@/features/onboarding/WelcomePage';
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
@@ -78,6 +79,12 @@ const runbooksRoute = createRoute({
   }),
 });
 
+const welcomeRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/welcome',
+  component: WelcomePage,
+});
+
 const auditRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/audit',
@@ -103,7 +110,7 @@ const accessRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
-  appRoute.addChildren([indexRoute, secretsRoute, searchRoute, codesRoute, automationRoute, runbooksRoute, accessRoute, auditRoute]),
+  appRoute.addChildren([indexRoute, secretsRoute, searchRoute, codesRoute, automationRoute, runbooksRoute, accessRoute, auditRoute, welcomeRoute]),
 ]);
 
 export const router = createRouter({

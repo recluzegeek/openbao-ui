@@ -546,6 +546,56 @@ button { cursor: pointer; }
 .spin { animation: audit-spin 1s linear infinite; }
 @keyframes audit-spin { to { transform: rotate(360deg); } }
 
+/* Onboarding / getting started */
+.skip-link {
+  position: absolute; left: 0.5rem; top: -3rem; z-index: 1000;
+  padding: 0.5rem 0.9rem; border-radius: var(--radius-lg);
+  background: var(--color-primary); color: var(--color-surface); font-weight: 600; text-decoration: none;
+}
+.skip-link:focus { top: 0.5rem; }
+.onboarding-banner {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem;
+  padding: 0.7rem 0.9rem; border: 1px solid var(--color-primary); border-radius: var(--radius-xl);
+  background: var(--color-primary-light); color: var(--color-text-primary); font-size: 0.86rem;
+}
+.onboarding-banner > span { flex: 1 1 320px; }
+.onboarding-banner > svg { color: var(--color-primary); flex: none; }
+.welcome-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
+.welcome-step {
+  display: grid; grid-template-columns: 30px 1fr; gap: 0.7rem;
+  padding: 0.9rem 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-xl);
+  background: var(--color-surface);
+}
+.welcome-step--current { border-color: var(--color-primary); box-shadow: var(--shadow-sm); }
+.welcome-step--done { background: var(--color-background); }
+.welcome-step__marker {
+  display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  background: var(--color-background); color: var(--color-text-muted);
+}
+.welcome-step--done .welcome-step__marker { background: var(--color-primary-light); color: var(--color-primary); }
+.welcome-step--current .welcome-step__marker { background: var(--color-primary); color: var(--color-surface); }
+.welcome-step__body { min-width: 0; display: grid; gap: 0.35rem; }
+.welcome-step__head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
+.welcome-step__icon { display: inline-flex; color: var(--color-primary); }
+.welcome-step__head h3 { margin-right: auto; font-size: 0.95rem; }
+.welcome-step__detail { margin-top: 0.35rem; }
+.shortcut-list { margin: 0; display: grid; gap: 0.35rem; }
+.shortcut-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 0.4rem 0; border-bottom: 1px solid var(--color-border);
+}
+.shortcut-row:last-child { border-bottom: 0; }
+.shortcut-row dt { font-size: 0.86rem; }
+.shortcut-row dd { margin: 0; }
+.shortcut-row kbd, .topbar__search kbd, .palette kbd {
+  padding: 0.1rem 0.4rem; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-background); font-family: ui-monospace, monospace; font-size: 0.72rem; color: var(--color-text-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+
 @media (max-width: 980px) {
   .app-shell { grid-template-columns: 1fr; }
   .sidebar { position: static; height: auto; flex-direction: row; align-items: center; overflow-x: auto; }

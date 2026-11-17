@@ -318,6 +318,17 @@ export const bao = {
     request<void>(`totp/keys/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 
   /* ACL policies, identities and auth methods for the access console. */
+  /** Whether a version-2 KV engine is mounted at `kv/` (setup-guide check). */
+  hasKvMount: async () => {
+    try {
+      const res = await request<{ data?: { options?: { version?: string }; type?: string } }>('sys/mounts/kv');
+      return res.data?.type === 'kv' && res.data?.options?.version === '2';
+    } catch (error) {
+      if (error instanceof BaoError && error.status === 404) return false;
+      throw error;
+    }
+  },
+
   listPolicies: async () => {
     const res = await bao.list('sys/policies/acl');
     return cleanKeys(res.data?.keys);

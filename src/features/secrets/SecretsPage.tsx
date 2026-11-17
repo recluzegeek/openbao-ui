@@ -58,6 +58,7 @@ import { useClipboard } from '@/lib/useClipboard';
 import { Badge } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
 import { CopyButton, Dialog, EmptyState, EnvBadge, ErrorState } from '@/components/common/Extras';
+import { OnboardingBanner } from '@/features/onboarding/OnboardingBanner';
 import { RecentActivityPanel } from './RecentActivityPanel';
 import { CompareEnvsPanel } from './CompareEnvsPanel';
 import { FieldTable } from './FieldTable';
@@ -529,6 +530,7 @@ export function SecretsPage() {
 
   return (
     <div className="grid" style={{ gap: '1.1rem' }}>
+      <OnboardingBanner />
       <div className="page__header">
         <div>
           <h2>Environment-aware secrets</h2>

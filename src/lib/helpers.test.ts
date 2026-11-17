@@ -19,6 +19,7 @@ import {
   templateRules,
 } from './policy';
 import { identitySnippets } from './machineIdentity';
+import { deriveSetupStage, setupSnippets, SHORTCUTS } from './setup';
 
 describe('OpenBao paths', () => {
   it('builds the POC KV layout', () => {
@@ -379,5 +380,27 @@ describe('secret-safe formatting', () => {
     expect(tokenTtlLabel(['root'], 0, undefined)).toBe('no expiry (root)');
     expect(tokenTtlLabel(['default'], 0, undefined)).toBe('no expiry');
     expect(tokenTtlLabel(['default'], 900, '2026-11-17T12:00:00Z')).toBe('15m');
+  });
+});
+
+describe('getting-started setup', () => {
+  const health = { initialized: true, sealed: false, standby: false, version: '1' };
+
+  it('derives the setup stage from live server state in priority order', () => {
+    expect(deriveSetupStage({})).toBe('checking');
+    expect(deriveSetupStage({ healthFailed: true })).toBe('unreachable');
+    expect(deriveSetupStage({ health: { ...health, initialized: false } })).toBe('uninitialized');
+    expect(deriveSetupStage({ health, seal: { sealed: true } as never })).toBe('sealed');
+    expect(deriveSetupStage({ health, kvMounted: false })).toBe('no-mount');
+    expect(deriveSetupStage({ health, kvMounted: true })).toBe('checking');
+    expect(deriveSetupStage({ health, kvMounted: true, projects: [] })).toBe('no-projects');
+    expect(deriveSetupStage({ health, kvMounted: true, projects: ['ui-demo'] })).toBe('ready');
+  });
+
+  it('keeps setup commands free of secret values', () => {
+    const all = Object.values(setupSnippets).join('\n');
+    expect(all).toContain('bao operator init');
+    expect(all).not.toMatch(/unseal_keys|root_token|secret_id|password=/i);
+    expect(SHORTCUTS.some((s) => s.keys.includes('⌘K'))).toBe(true);
   });
 });

@@ -8,6 +8,7 @@ semantic HTML, explicit `data-testid` hooks, and no hidden state.
 | Route | Purpose | Search params |
 | --- | --- | --- |
 | `/login` | token/userpass sign-in, sealed-server unseal | — |
+| `/welcome` | getting-started checklist that follows live server state | — |
 | `/secrets` | environment-aware KV browser | `project`, `env`, `service`, `folder` |
 | `/search` | global key/path/project/field search, recents and favorites | `q` |
 | `/runbooks` | operational notes and related-secret links | `project` |
@@ -77,6 +78,9 @@ function adds the `kv/data/` prefix itself. Create passes CAS `0`; edit passes t
 - `simulator-run` / `simulator-result-<path>` — capability simulator and its result rows
 - `identity-kind-<kind>` / `identity-snippet-cli` / `identity-snippet-http` — machine-identity wizard
 - `audit-search` / `audit-actor` / `audit-operation` / `audit-range` — audit filters; `audit-table` / `audit-entry-<n>` — results
+- `welcome-page` — getting-started guide (`data-stage` = derived server stage); `welcome-step-<id>` — checklist steps
+- `onboarding-banner` / `onboarding-open` / `onboarding-dismiss` — first-run hint on `/secrets`
+- `shortcuts-open` / `shortcuts-dialog` / `shortcut-list` — keyboard-shortcut help
 - copy buttons use `data-testid="copy-<label>"`
 
 The dev server also exposes `GET /api/audit?path=<api path>&limit=<n>` (localhost only, dev build
@@ -93,6 +97,14 @@ role policies, and a `ui-demo-ci` identity entity. It is idempotent and never pr
 The access simulator mints a short-lived token with `auth/token/create`, checks `sys/capabilities`
 and revokes the token in a `finally` block; the token value never reaches UI state or logs. When the
 current token cannot mint one, it falls back to describing the selected policies locally.
+
+**Onboarding and shortcuts:** `/welcome` derives its stage from `sys/health`, `sys/seal-status`,
+`sys/mounts/kv` and the project list (`deriveSetupStage()` in `src/lib/setup.ts`). The operator
+commands it shows never contain secret values — `operator init` output is never displayed or stored.
+The first-run banner is remembered in `localStorage` under `console.onboarding`; `resetOnboarding()`
+restores it. Global shortcuts are `⌘K/Ctrl+K` (palette), `Alt+1`–`Alt+8` (sidebar sections), `/`
+(search), `?` (shortcut help) and `Esc`; they pause while typing in a field. A skip link and a
+`prefers-reduced-motion` rule are in the app shell and global CSS.
 
 ## Rules for agents editing this repo
 
