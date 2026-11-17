@@ -1,0 +1,113 @@
+import { useQuery } from '@tanstack/react-query';
+import { bao } from './api';
+import {
+  metadataPath,
+  secretApiPath,
+  secretPath,
+  totpCodePath,
+  totpKeyPath,
+} from './baoPaths';
+
+export function useProjects() {
+  return useQuery({
+    queryKey: ['projects'],
+    queryFn: () => bao.listProjects(),
+    staleTime: 60_000,
+  });
+}
+
+export function useEnvironments(project?: string) {
+  return useQuery({
+    queryKey: ['environments', project],
+    queryFn: () => (project ? bao.listEnvironments(project) : []),
+    enabled: Boolean(project),
+    staleTime: 60_000,
+  });
+}
+
+export function useServices(project?: string, env?: string) {
+  return useQuery({
+    queryKey: ['services', project, env],
+    queryFn: () => (project && env ? bao.listServices(project, env) : []),
+    enabled: Boolean(project && env),
+    staleTime: 30_000,
+  });
+}
+
+export function useCredentials(project?: string) {
+  return useQuery({
+    queryKey: ['credentials', project],
+    queryFn: () => (project ? bao.listCreds(project) : []),
+    enabled: Boolean(project),
+    staleTime: 60_000,
+  });
+}
+
+export function useSecret(project?: string, env?: string, service?: string, version?: number) {
+  return useQuery({
+    queryKey: ['secret', project, env, service, version ?? 'latest'],
+    queryFn: () => bao.readSecret(secretApiPath(project!, env!, service!), version),
+    enabled: Boolean(project && env && service),
+    staleTime: 15_000,
+  });
+}
+
+export function useSecretMetadata(project?: string, env?: string, service?: string) {
+  return useQuery({
+    queryKey: ['secret-metadata', project, env, service],
+    queryFn: () => bao.readMetadata(secretApiPath(project!, env!, service!)),
+    enabled: Boolean(project && env && service),
+    staleTime: 30_000,
+  });
+}
+
+export function useCapabilities(paths: string[]) {
+  const key = [...paths].sort().join('|');
+  return useQuery({
+    queryKey: ['capabilities', key],
+    queryFn: () => bao.capabilities(paths).then((res) => res.data),
+    enabled: paths.length > 0,
+    staleTime: 60_000,
+  });
+}
+
+export function capabilityPathsForSecret(project?: string, env?: string, service?: string, allEnvs: string[] = []) {
+  if (!project || !env || !service) return [];
+  return [
+    metadataPath(project),
+    secretPath(project, env, service),
+    ...allEnvs.filter((e) => e !== env).map((e) => secretPath(project, e, service)),
+    ...allEnvs.map((e) => `kv/metadata/${project}/env/${e}/`),
+  ];
+}
+
+export function useTotpAccounts() {
+  return useQuery({
+    queryKey: ['totp-accounts'],
+    queryFn: () => bao.listTotpAccounts(),
+    staleTime: 30_000,
+  });
+}
+
+export function useTotpCode(account?: string) {
+  return useQuery({
+    queryKey: ['totp-code', account],
+    queryFn: () => bao.readTotpCode(account!),
+    enabled: Boolean(account),
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+  });
+}
+
+export function useTotpKey(account?: string) {
+  return useQuery({
+    queryKey: ['totp-key', account],
+    queryFn: () => bao.readTotpKey(account!),
+    enabled: Boolean(account),
+    staleTime: 60_000,
+  });
+}
+
+export function totpCapabilityPaths(accounts: string[]) {
+  return accounts.flatMap((account) => [totpCodePath(account), totpKeyPath(account)]);
+}

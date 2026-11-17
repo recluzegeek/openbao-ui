@@ -1,0 +1,119 @@
+.card {
+  background-color: var(--color-surface);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition: all var(--transition-base);
+}
+
+/* Variants */
+.card--default {
+  border: none;
+  box-shadow: var(--shadow-lg);
+}
+
+.card--bordered {
+  border: 1px solid var(--color-border);
+  box-shadow: none;
+}
+
+.card--elevated {
+  border: none;
+  box-shadow: var(--shadow-md);
+}
+
+.card--elevated:hover {
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
+}
+
+.card--table {
+  border: none;
+  box-shadow: var(--shadow-lg);
+  transition: all var(--transition-fast);
+  background: var(--color-surface);
+  position: relative;
+  overflow: hidden;
+}
+
+.card--table::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--color-primary-500);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.card--table:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-xl);
+}
+
+.card--table:hover::after {
+  opacity: 1;
+}
+
+/* Card Header */
+.card__header {
+  padding: var(--spacing-lg) var(--spacing-lg) var(--spacing-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.card__header:last-child {
+  border-bottom: none;
+  padding-bottom: var(--spacing-lg);
+}
+
+/* Card Title */
+.card__title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+/* Table variant title styling */
+.card--table .card__title {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.card--table .card__title img {
+  filter: brightness(0) saturate(100%) invert(36%) sepia(74%) saturate(1204%)
+    hue-rotate(204deg) brightness(101%) contrast(101%);
+}
+
+/* Card Description */
+.card__description {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  margin: var(--spacing-xs) 0 0;
+  line-height: 1.5;
+}
+
+/* Card Content */
+.card__content {
+  padding: var(--spacing-lg);
+}
+
+.card__content:first-child {
+  padding-top: var(--spacing-lg);
+}
+
+.card__header + .card__content {
+  padding-top: var(--spacing-md);
+}
+
+/* Compact version for list items */
+.card--compact .card__content {
+  padding: var(--spacing-md);
+}
