@@ -12,6 +12,7 @@ semantic HTML, explicit `data-testid` hooks, and no hidden state.
 | `/search` | global key/path/project/field search, recents and favorites | `q` |
 | `/runbooks` | operational notes and related-secret links | `project` |
 | `/codes` | TOTP codes and admin actions | — |
+| `/access` | visual access control: roles, policy builder, simulator, machine identities | `view`, `project`, `env` |
 | `/automation` | capability inspector and command snippets | `path` (OpenBao API path) |
 
 Example deep link:
@@ -37,6 +38,11 @@ totp/keys/<project>--<account>                   account config / admin
 
 The API facade is `src/lib/api.ts`. It prefixes `/v1/`, adds `X-Vault-Token` and
 `X-Vault-Namespace`, and throws `BaoError` with the HTTP status. Do not add a separate proxy.
+
+**ACL glob caveat:** the local OpenBao build treats a trailing `*` as a recursive prefix wildcard
+(`kv/data/ui-demo/env/*` covers every environment and folder). Mid-path `*`, `**` and `?` are
+literal characters. Generate and seed policies with the `*` at the end of the path; `globMatches()`
+in `src/lib/policy.ts` mirrors this. Confirm with `sys/capabilities` if in doubt.
 
 ## Capability gating
 
@@ -64,6 +70,11 @@ function adds the `kv/data/` prefix itself. Create passes CAS `0`; edit passes t
 - `code-<account>` / `code-value-<account>` — TOTP card and value
 - `global-search-input` — global search box; `search-hit-<key-or-path>` — a result
 - `command-palette` — the ⌘K/Ctrl+K overlay (also opened by the topbar Search button)
+- `access-tab-<view>` — access-control tab (`roles`, `builder`, `simulator`, `identities`)
+- `role-template-<id>` / `write-<id>` — a role card and its policy-write button
+- `policy-rules` / `policy-rule-<n>` / `save-policy` — visual policy builder
+- `simulator-run` / `simulator-result-<path>` — capability simulator and its result rows
+- `identity-kind-<kind>` / `identity-snippet-cli` / `identity-snippet-http` — machine-identity wizard
 - copy buttons use `data-testid="copy-<label>"`
 
 The dev server also exposes `GET /api/audit?path=<api path>` (localhost only, dev build only) for the
@@ -73,8 +84,12 @@ audit log and never includes secret values.
 ## Local fixtures
 
 `./scripts/seed.sh` creates the `ui-demo` project (dev/staging/prod × web/billing), a shared
-credential, a TOTP account, and a `ui-manager` read-only login. It is idempotent and never prints
-secrets.
+credential, a TOTP account, a `ui-manager` read-only login, the `ui-demo-viewer/developer/admin`
+role policies, and a `ui-demo-ci` identity entity. It is idempotent and never prints secrets.
+
+The access simulator mints a short-lived token with `auth/token/create`, checks `sys/capabilities`
+and revokes the token in a `finally` block; the token value never reaches UI state or logs. When the
+current token cannot mint one, it falls back to describing the selected policies locally.
 
 ## Rules for agents editing this repo
 

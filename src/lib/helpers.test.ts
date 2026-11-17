@@ -11,6 +11,14 @@ import { buildReferenceLookup, findReferences, parseKeyValueText, resolveReferen
 import { effectiveValue, mergeAnnotations, overridesFor, parseAnnotations, withOverridesFor } from './secretMetadata';
 import { actorForVersion, diffData } from './secretDiff';
 import { isFavorite, loadFavorites, loadRecent, pushRecent, secretHref, toggleFavorite } from './navigationMemory';
+import {
+  generateHcl,
+  globMatches,
+  parseHcl,
+  simulateCapabilities,
+  templateRules,
+} from './policy';
+import { identitySnippets } from './machineIdentity';
 
 describe('OpenBao paths', () => {
   it('builds the POC KV layout', () => {
@@ -216,6 +224,75 @@ function memoryStorage(): Storage {
     setItem: (key, value) => { data.set(key, String(value)); },
   };
 }
+
+describe('policy builder', () => {
+  it('round-trips visual rules through HCL', () => {
+    const rules = templateRules('developer', 'ui-demo', 'development');
+    const parsed = parseHcl(generateHcl(rules));
+    expect(parsed.error).toBeUndefined();
+    expect(parsed.rules).toEqual(rules);
+  });
+
+  it('scopes templates by project and environment', () => {
+    const viewer = templateRules('viewer', 'ui-demo', 'staging');
+    expect(viewer.some((rule) => rule.path === 'kv/data/ui-demo/env/staging/*')).toBe(true);
+    expect(viewer.some((rule) => rule.path === 'kv/data/other/env/staging/*')).toBe(false);
+    expect(viewer.every((rule) => !rule.capabilities.includes('create'))).toBe(true);
+    const admin = templateRules('admin', 'ui-demo');
+    expect(admin.find((rule) => rule.path === 'kv/data/ui-demo/env/*')?.capabilities).toEqual(
+      expect.arrayContaining(['create', 'read', 'update', 'delete']),
+    );
+    expect(admin.some((rule) => rule.path.startsWith('totp/keys/ui-demo--'))).toBe(true);
+  });
+
+  it('matches trailing-star prefixes the way this OpenBao build does', () => {
+    expect(globMatches('kv/data/ui-demo/env/*', 'kv/data/ui-demo/env/web')).toBe(true);
+    expect(globMatches('kv/data/ui-demo/env/*', 'kv/data/ui-demo/env/api/gateway')).toBe(true);
+    expect(globMatches('kv/data/ui-demo/env/development/*', 'kv/data/ui-demo/env/production/web')).toBe(false);
+    expect(globMatches('totp/code/ui-demo--*', 'totp/code/ui-demo--example-console')).toBe(true);
+    // `**`, mid-path `*` and `?` are literal in this build, not wildcards.
+    expect(globMatches('kv/data/ui-demo/env/**', 'kv/data/ui-demo/env/api/gateway')).toBe(false);
+    expect(globMatches('kv/data/ui-demo/env/*/web', 'kv/data/ui-demo/env/development/web')).toBe(false);
+    expect(globMatches('totp/code/ui-demo--????', 'totp/code/ui-demo--abcd')).toBe(false);
+  });
+
+  it('estimates capabilities and honours deny rules', () => {
+    const rules = templateRules('developer', 'ui-demo', 'development');
+    expect(simulateCapabilities(rules, 'kv/data/ui-demo/env/development/web')).toEqual(
+      expect.arrayContaining(['create', 'read', 'update', 'delete']),
+    );
+    expect(simulateCapabilities(rules, 'kv/data/ui-demo/env/production/web')).toEqual([]);
+    expect(simulateCapabilities([...rules, { path: 'kv/data/ui-demo/env/*', capabilities: ['deny'] }], 'kv/data/ui-demo/env/development/web')).toEqual(['deny']);
+  });
+
+  it('reports malformed HCL instead of guessing', () => {
+    expect(parseHcl('path "kv/data/x" {\n capabilities = ["read"]\n').error).toMatch(/Unclosed/);
+    expect(parseHcl('garbage').error).toMatch(/Cannot parse line/);
+    expect(parseHcl('path "kv/data/x" {\n}\n').error).toMatch(/no capabilities/);
+  });
+});
+
+describe('machine identity snippets', () => {
+  it('generates scoped commands for every auth method', () => {
+    const options = { name: 'ci-deploy', policies: ['ui-demo-viewer'], serviceAccount: 'deploy', namespace: 'apps', audience: 'openbao', issuer: 'https://id.example.com', roleArn: 'arn:aws:iam::1:role/ci' };
+    for (const kind of ['approle', 'kubernetes', 'jwt-oidc', 'cloud'] as const) {
+      const snippets = identitySnippets(kind, options);
+      expect(snippets.cli).toContain('ci-deploy');
+      expect(snippets.cli).toContain('ui-demo-viewer');
+      expect(snippets.http).toContain('X-Vault-Token');
+      expect(snippets.notes.length).toBeGreaterThan(0);
+    }
+    expect(identitySnippets('kubernetes', options).cli).toContain('bound_service_account_namespaces="apps"');
+    expect(identitySnippets('jwt-oidc', options).cli).toContain('bound_audiences="openbao"');
+    expect(identitySnippets('cloud', { ...options, cloudProvider: 'aws' }).cli).toContain('auth_type="iam"');
+  });
+
+  it('never embeds credential values in generated commands', () => {
+    const snippets = identitySnippets('approle', { name: 'ci', policies: ['p'] });
+    expect(snippets.cli + snippets.http).not.toContain('secret_id=');
+    expect(snippets.cli).toContain('bao write -f');
+  });
+});
 
 describe('navigation memory', () => {
   it('keeps recent paths without values and deduplicates them', () => {

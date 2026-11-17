@@ -55,6 +55,14 @@ The fork remains useful as a design reference; it is a poor base for a small, re
   starred favorites (this browser) are kept as **paths only** — no values are persisted. A ⌘K/Ctrl+K
   command palette (also available from the topbar) jumps to routes, recents and favorites or starts a
   search, with keyboard-only navigation.
+- **Visual access control:** `/access` starts from Viewer/Developer/Admin role templates scoped to a
+  project (and optionally one environment), writes the resulting ACL policy to OpenBao, and offers a
+  visual rule editor that round-trips through the exact HCL that is saved. The **access simulator**
+  checks real capabilities by minting a short-lived token, querying `sys/capabilities` and revoking
+  the token immediately; it falls back to a local HCL estimate when the current token cannot mint
+  one. No simulation token value is shown or stored. The **machine identities** tab generates
+  AppRole, Kubernetes, JWT/OIDC and cloud-IAM setup commands for a chosen set of policies — without
+  embedding credentials or secret values.
 - **Recent activity:** a non-blocking "who changed this" panel on each secret, built from OpenBao's
   audit log. It shows actor, operation, path and time — never secret values — and degrades quietly
   when the log is unavailable.

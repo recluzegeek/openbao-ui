@@ -7,6 +7,7 @@ import { CodesPage } from '@/features/totp/CodesPage';
 import { AutomationPage } from '@/features/automation/AutomationPage';
 import { RunbooksPage } from '@/features/runbooks/RunbooksPage';
 import { SearchPage } from '@/features/search/SearchPage';
+import { AccessPage } from '@/features/access/AccessPage';
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
@@ -76,9 +77,20 @@ const runbooksRoute = createRoute({
   }),
 });
 
+const accessRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/access',
+  component: AccessPage,
+  validateSearch: (search: Record<string, unknown>) => ({
+    view: typeof search.view === 'string' ? search.view : undefined,
+    project: typeof search.project === 'string' ? search.project : undefined,
+    env: typeof search.env === 'string' ? search.env : undefined,
+  }),
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
-  appRoute.addChildren([indexRoute, secretsRoute, searchRoute, codesRoute, automationRoute, runbooksRoute]),
+  appRoute.addChildren([indexRoute, secretsRoute, searchRoute, codesRoute, automationRoute, runbooksRoute, accessRoute]),
 ]);
 
 export const router = createRouter({

@@ -144,5 +144,39 @@ path "totp/code/ui-demo--*" { capabilities = ["read"] }
 ' '{policy:$policy}')"
 api POST auth/userpass/users/ui-manager "$(jq -nc '{password:"demo-only",policies:["ui-demo-manager"],token_ttl:"8h"}')"
 
+# Role templates shown in the access console. These mirror `templateRules()` in src/lib/policy.ts.
+# This OpenBao build treats a trailing `*` as a recursive prefix wildcard (`**` is literal).
+api POST sys/policies/acl/ui-demo-viewer "$(jq -nc --arg policy '
+path "kv/metadata/ui-demo/" { capabilities = ["list"] }
+path "kv/metadata/ui-demo/env/" { capabilities = ["list"] }
+path "kv/metadata/ui-demo/env/*" { capabilities = ["list","read"] }
+path "kv/data/ui-demo/env/*" { capabilities = ["read"] }
+path "kv/metadata/ui-demo/creds/" { capabilities = ["list"] }
+path "kv/data/ui-demo/creds/*" { capabilities = ["read"] }
+' '{policy:$policy}')"
+api POST sys/policies/acl/ui-demo-developer "$(jq -nc --arg policy '
+path "kv/metadata/ui-demo/" { capabilities = ["list"] }
+path "kv/metadata/ui-demo/env/" { capabilities = ["list"] }
+path "kv/metadata/ui-demo/env/*" { capabilities = ["create","list","read","update"] }
+path "kv/data/ui-demo/env/*" { capabilities = ["create","read","update","delete"] }
+path "kv/metadata/ui-demo/creds/" { capabilities = ["list"] }
+path "kv/data/ui-demo/creds/*" { capabilities = ["read"] }
+' '{policy:$policy}')"
+api POST sys/policies/acl/ui-demo-admin "$(jq -nc --arg policy '
+path "kv/metadata/ui-demo/" { capabilities = ["list"] }
+path "kv/metadata/ui-demo/env/" { capabilities = ["list"] }
+path "kv/metadata/ui-demo/env/*" { capabilities = ["create","list","read","update"] }
+path "kv/data/ui-demo/env/*" { capabilities = ["create","read","update","delete"] }
+path "kv/metadata/ui-demo/creds/" { capabilities = ["list"] }
+path "kv/data/ui-demo/creds/*" { capabilities = ["create","read","update","delete"] }
+path "kv/metadata/ui-demo/creds/*" { capabilities = ["create","list","read","update","delete"] }
+path "totp/code/ui-demo--*" { capabilities = ["read"] }
+path "totp/keys/ui-demo--*" { capabilities = ["create","read","update","delete"] }
+' '{policy:$policy}')"
+
+# A machine identity entity so the access simulator has a realistic starting point.
+api POST identity/entity/name/ui-demo-ci "$(jq -nc '{policies:["ui-demo-viewer"]}')"
+
 echo "Seeded ui-demo into $ADDR (project tiers, 2 services, 1 shared credential, 1 TOTP account)."
+echo "Access demo: ui-demo-viewer / ui-demo-developer / ui-demo-admin policies and the ui-demo-ci entity."
 echo "Manager login: ui-manager / demo-only (local development only)."

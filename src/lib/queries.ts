@@ -177,3 +177,35 @@ export function useTotpKey(account?: string) {
 export function totpCapabilityPaths(accounts: string[]) {
   return accounts.flatMap((account) => [totpCodePath(account), totpKeyPath(account)]);
 }
+
+export function usePolicies() {
+  return useQuery({ queryKey: ['acl-policies'], queryFn: () => bao.listPolicies(), staleTime: 60_000 });
+}
+
+export function usePolicy(name?: string) {
+  return useQuery({
+    queryKey: ['acl-policy', name],
+    queryFn: () => bao.readPolicy(name!),
+    enabled: Boolean(name),
+    staleTime: 30_000,
+  });
+}
+
+export function useEntities() {
+  return useQuery({ queryKey: ['entities'], queryFn: () => bao.listEntities(), staleTime: 60_000 });
+}
+
+export function useAuthMethods() {
+  return useQuery({ queryKey: ['auth-methods'], queryFn: () => bao.listAuthMethods(), staleTime: 60_000 });
+}
+
+/** Paths checked to decide whether policy editing and simulation are available. */
+export function accessCapabilityPaths() {
+  return [
+    'sys/policies/acl/',
+    'sys/policies/acl/__new__',
+    'identity/entity/name/',
+    'auth/token/create',
+    'sys/auth/',
+  ];
+}

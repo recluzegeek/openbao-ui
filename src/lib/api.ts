@@ -187,6 +187,22 @@ export interface ListResponse {
   data: { keys: string[] } | null;
 }
 
+export interface AclPolicyResponse {
+  data: { name?: string; policy: string };
+}
+
+export interface AuthMethodSummary {
+  path: string;
+  type: string;
+  accessor?: string;
+}
+
+export interface EntitySummary {
+  name: string;
+  id?: string;
+  policies: string[];
+}
+
 export interface TotpKeyResponse {
   data: {
     issuer?: string;
@@ -300,6 +316,58 @@ export const bao = {
     }),
   deleteTotpKey: (name: string) =>
     request<void>(`totp/keys/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+
+  /* ACL policies, identities and auth methods for the access console. */
+  listPolicies: async () => {
+    const res = await bao.list('sys/policies/acl');
+    return cleanKeys(res.data?.keys);
+  },
+  readPolicy: (name: string) => request<AclPolicyResponse>(`sys/policies/acl/${encodeURIComponent(name)}`),
+  writePolicy: (name: string, policy: string) =>
+    request<void>(`sys/policies/acl/${encodeURIComponent(name)}`, { method: 'POST', data: { policy } }),
+  deletePolicy: (name: string) =>
+    request<void>(`sys/policies/acl/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+
+  listEntities: async () => {
+    const res = await bao.list('identity/entity/name');
+    return cleanKeys(res.data?.keys);
+  },
+  readEntity: async (name: string): Promise<EntitySummary> => {
+    const res = await request<{ data?: { name?: string; policies?: string[] } }>(
+      `identity/entity/name/${encodeURIComponent(name)}`,
+    );
+    return { name: res.data?.name ?? name, policies: cleanKeys(res.data?.policies) };
+  },
+  listAuthMethods: async (): Promise<AuthMethodSummary[]> => {
+    const res = await request<{ data?: Record<string, { type?: string; accessor?: string }> }>('sys/auth');
+    return Object.entries(res.data ?? {}).map(([path, config]) => ({
+      path: path.replace(/\/$/, ''),
+      type: config?.type ?? 'unknown',
+      accessor: config?.accessor,
+    }));
+  },
+
+  /**
+   * Checks real capabilities for a set of policies. A short-lived token is minted and revoked in a
+   * finally block; the token value never leaves this function or enters UI state/logs.
+   */
+  simulatePolicies: async (policies: string[], paths: string[]): Promise<CapabilitiesMap> => {
+    const created = await request<{ auth?: { client_token?: string } }>('auth/token/create', {
+      method: 'POST',
+      data: { policies, ttl: '5m', display_name: 'console-access-sim' },
+    });
+    const token = created.auth?.client_token;
+    if (!token) throw new BaoError('OpenBao did not return a simulation token.', 0, 'auth/token/create');
+    try {
+      const result = await request<{ data?: CapabilitiesMap }>('sys/capabilities', {
+        method: 'POST',
+        data: { token, paths },
+      });
+      return result.data ?? {};
+    } finally {
+      await request<void>('auth/token/revoke', { method: 'POST', data: { token } }).catch(() => undefined);
+    }
+  },
 
   /** Dev-only local audit view; this endpoint is served by the Vite middleware, not OpenBao. */
   auditTrail: async (path: string): Promise<AuditResponse> => {
