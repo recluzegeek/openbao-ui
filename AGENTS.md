@@ -9,6 +9,7 @@ semantic HTML, explicit `data-testid` hooks, and no hidden state.
 | --- | --- | --- |
 | `/login` | token/userpass sign-in, sealed-server unseal | — |
 | `/secrets` | environment-aware KV browser | `project`, `env`, `service`, `folder` |
+| `/search` | global key/path/project/field search, recents and favorites | `q` |
 | `/runbooks` | operational notes and related-secret links | `project` |
 | `/codes` | TOTP codes and admin actions | — |
 | `/automation` | capability inspector and command snippets | `path` (OpenBao API path) |
@@ -61,6 +62,8 @@ function adds the `kv/data/` prefix itself. Create passes CAS `0`; edit passes t
 - `version-<n>` — a KV version row; `version-diff` — the two-version diff table
 - `diff-<key>` — a field row in the version diff
 - `code-<account>` / `code-value-<account>` — TOTP card and value
+- `global-search-input` — global search box; `search-hit-<key-or-path>` — a result
+- `command-palette` — the ⌘K/Ctrl+K overlay (also opened by the topbar Search button)
 - copy buttons use `data-testid="copy-<label>"`
 
 The dev server also exposes `GET /api/audit?path=<api path>` (localhost only, dev build only) for the

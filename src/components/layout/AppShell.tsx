@@ -1,13 +1,15 @@
 import { useEffect } from 'react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { BookOpen, KeyRound, LogOut, Moon, Server, ShieldCheck, Sun, TerminalSquare } from 'lucide-react';
+import { BookOpen, KeyRound, LogOut, Moon, Search, Server, ShieldCheck, Sun, TerminalSquare } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { useTheme } from '@/lib/useTheme';
 import { tokenTtlLabel } from '@/lib/format';
+import { CommandPalette } from './CommandPalette';
 
 const links = [
   { to: '/secrets' as const, label: 'Secrets', icon: KeyRound },
+  { to: '/search' as const, label: 'Search', icon: Search },
   { to: '/runbooks' as const, label: 'Runbooks', icon: BookOpen },
   { to: '/codes' as const, label: 'One-time codes', icon: ShieldCheck },
   { to: '/automation' as const, label: 'For agents', icon: TerminalSquare },
@@ -86,6 +88,14 @@ export function AppShell() {
             <p>Manage secrets, codes and machine access in one place</p>
           </div>
           <div className="topbar__actions">
+            <button
+              className="btn btn--outlined btn--small topbar__search"
+              onClick={() => window.dispatchEvent(new Event('console:open-palette'))}
+              aria-label="Open command palette"
+              title="Open command palette (⌘K / Ctrl+K)"
+            >
+              <Search size={15} /> <span>Search</span> <kbd>⌘K</kbd>
+            </button>
             <label className="small muted" htmlFor="namespace">Namespace</label>
             <input
               id="namespace"
@@ -105,6 +115,7 @@ export function AppShell() {
         </header>
         <main className="page"><Outlet /></main>
       </div>
+      <CommandPalette />
     </div>
   );
 }

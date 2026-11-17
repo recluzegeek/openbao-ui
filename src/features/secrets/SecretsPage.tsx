@@ -30,6 +30,7 @@ import { bao, type CapabilitiesMap } from '@/lib/api';
 import { can, deniedReason } from '@/lib/capabilities';
 import { envRank, secretApiPath, secretPath } from '@/lib/baoPaths';
 import { envFile, formatWhen, mask } from '@/lib/format';
+import { pushRecent } from '@/lib/navigationMemory';
 import { dataFromRows, rowsFromData, validateRows, type FieldRow } from '@/lib/secretForm';
 import { buildReferenceLookup, findReferences, resolveReferences, parseKeyValueText, serializeKeyValue, type ImportFormat } from '@/lib/secretFormats';
 import {
@@ -271,6 +272,11 @@ export function SecretsPage() {
       });
     }
   }, [project, env, service, folder, navigate]);
+
+  // Remember only the path of the secret the user opens — never its values.
+  useEffect(() => {
+    if (project && env && service) pushRecent({ project, env, path: service });
+  }, [project, env, service]);
 
   const capsQ = useCapabilities(capabilityPathsForFolder(project, env, folder, allPaths));
   const caps = capsQ.data;

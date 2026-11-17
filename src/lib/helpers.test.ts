@@ -10,6 +10,7 @@ import { buildSecretTree, folderBreadcrumbs, folderInTree, validSecretPath } fro
 import { buildReferenceLookup, findReferences, parseKeyValueText, resolveReferences, serializeKeyValue } from './secretFormats';
 import { effectiveValue, mergeAnnotations, overridesFor, parseAnnotations, withOverridesFor } from './secretMetadata';
 import { actorForVersion, diffData } from './secretDiff';
+import { isFavorite, loadFavorites, loadRecent, pushRecent, secretHref, toggleFavorite } from './navigationMemory';
 
 describe('OpenBao paths', () => {
   it('builds the POC KV layout', () => {
@@ -201,6 +202,43 @@ describe('version diffs', () => {
     ];
     expect(actorForVersion(entries, '2026-11-17T10:01:10Z')).toBe('root');
     expect(actorForVersion(entries, '2026-11-17T09:00:00Z')).toBeUndefined();
+  });
+});
+
+function memoryStorage(): Storage {
+  const data = new Map<string, string>();
+  return {
+    get length() { return data.size; },
+    clear: () => data.clear(),
+    getItem: (key) => data.get(key) ?? null,
+    key: (index) => [...data.keys()][index] ?? null,
+    removeItem: (key) => { data.delete(key); },
+    setItem: (key, value) => { data.set(key, String(value)); },
+  };
+}
+
+describe('navigation memory', () => {
+  it('keeps recent paths without values and deduplicates them', () => {
+    const storage = memoryStorage();
+    storage.clear();
+    const ref = { project: 'ui-demo', env: 'development', path: 'web' };
+    pushRecent(ref, storage);
+    pushRecent(ref, storage);
+    pushRecent({ ...ref, path: 'billing' }, storage);
+    expect(loadRecent(storage).map((item) => item.path)).toEqual(['billing', 'web']);
+    expect(secretHref({ ...ref, visitedAt: 0 })).toBe('/secrets?project=ui-demo&env=development&service=web');
+    expect(secretHref({ ...ref, path: 'database/postgres', visitedAt: 0 })).toContain('folder=database');
+  });
+
+  it('toggles favorites by path', () => {
+    const storage = memoryStorage();
+    storage.clear();
+    const ref = { project: 'ui-demo', env: 'staging', path: 'web', key: 'API_KEY' };
+    toggleFavorite(ref, storage);
+    expect(loadFavorites(storage)).toHaveLength(1);
+    expect(isFavorite(ref, loadFavorites(storage))).toBe(true);
+    toggleFavorite(ref, storage);
+    expect(loadFavorites(storage)).toHaveLength(0);
   });
 });
 

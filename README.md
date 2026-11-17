@@ -50,6 +50,11 @@ The fork remains useful as a design reference; it is a poor base for a small, re
   Pinned names live in this browser tab only; codes are never stored.
 - **For agents:** identity and policy summary, capability inspection for any path, and copyable
   CLI/cURL/`.env`/GitHub Actions snippets that never contain secret values.
+- **Global search and navigation:** `/search` finds a secret by path or a field by name across every
+  readable project/environment, with a deep link for each result. Recent secrets (this tab) and
+  starred favorites (this browser) are kept as **paths only** — no values are persisted. A ⌘K/Ctrl+K
+  command palette (also available from the topbar) jumps to routes, recents and favorites or starts a
+  search, with keyboard-only navigation.
 - **Recent activity:** a non-blocking "who changed this" panel on each secret, built from OpenBao's
   audit log. It shows actor, operation, path and time — never secret values — and degrades quietly
   when the log is unavailable.

@@ -6,6 +6,7 @@ import { SecretsPage } from '@/features/secrets/SecretsPage';
 import { CodesPage } from '@/features/totp/CodesPage';
 import { AutomationPage } from '@/features/automation/AutomationPage';
 import { RunbooksPage } from '@/features/runbooks/RunbooksPage';
+import { SearchPage } from '@/features/search/SearchPage';
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
@@ -42,6 +43,15 @@ const secretsRoute = createRoute({
   }),
 });
 
+const searchRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/search',
+  component: SearchPage,
+  validateSearch: (search: Record<string, unknown>) => ({
+    q: typeof search.q === 'string' ? search.q : undefined,
+  }),
+});
+
 const codesRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/codes',
@@ -68,7 +78,7 @@ const runbooksRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
-  appRoute.addChildren([indexRoute, secretsRoute, codesRoute, automationRoute, runbooksRoute]),
+  appRoute.addChildren([indexRoute, secretsRoute, searchRoute, codesRoute, automationRoute, runbooksRoute]),
 ]);
 
 export const router = createRouter({
