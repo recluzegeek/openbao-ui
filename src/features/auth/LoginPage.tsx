@@ -38,7 +38,7 @@ export function LoginPage() {
   });
 
   useEffect(() => {
-    if (auth.status === 'authenticated') void navigate({ to: '/secrets', search: { project: undefined, env: undefined, service: undefined }, replace: true });
+    if (auth.status === 'authenticated') void navigate({ to: '/secrets', search: { project: undefined, env: undefined, service: undefined, folder: undefined }, replace: true });
   }, [auth.status, navigate]);
 
   async function handleSubmit(event: FormEvent) {
@@ -49,7 +49,7 @@ export function LoginPage() {
       if (method === 'token') await auth.loginWithToken(token, address, namespace);
       else await auth.loginWithUserpass(username, password, address, namespace);
       addToast('success', 'Signed in');
-      await navigate({ to: '/secrets', search: { project: undefined, env: undefined, service: undefined }, replace: true });
+      await navigate({ to: '/secrets', search: { project: undefined, env: undefined, service: undefined, folder: undefined }, replace: true });
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : 'Sign-in failed');
     } finally {

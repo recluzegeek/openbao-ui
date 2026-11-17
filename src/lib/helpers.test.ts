@@ -6,6 +6,7 @@ import { baoCliSnippet, curlSnippet } from './snippets';
 import { dataFromRows, rowsFromData, validSecretName, validateRows } from './secretForm';
 import { capabilityPathsForSecret } from './queries';
 import { actorLabel, operationLabel } from './audit';
+import { buildSecretTree, folderBreadcrumbs, folderInTree, validSecretPath } from './secretTree';
 
 describe('OpenBao paths', () => {
   it('builds the POC KV layout', () => {
@@ -65,6 +66,27 @@ describe('secret editor', () => {
     expect(paths).toContain('kv/data/ui-demo/env/development/__new__');
     expect(paths).toContain('kv/data/ui-demo/env/development/web');
     expect(paths).toContain('kv/data/ui-demo/env/staging/web');
+  });
+});
+
+describe('folder model', () => {
+  it('builds a folder tree from flat KV paths', () => {
+    const tree = buildSecretTree(['web', 'billing', 'database/postgres', 'database/replica', 'api/deep/gateway']);
+    expect(tree.secrets).toEqual(['billing', 'web']);
+    expect(tree.folders.map((folder) => folder.name)).toEqual(['api', 'database']);
+    expect(folderInTree(tree, 'database')?.secrets).toEqual(['database/postgres', 'database/replica']);
+    expect(folderInTree(tree, 'api/deep')?.secrets).toEqual(['api/deep/gateway']);
+  });
+
+  it('builds breadcrumbs and validates relative secret paths', () => {
+    expect(folderBreadcrumbs('api/deep')).toEqual([
+      { label: 'Root', path: '' },
+      { label: 'api', path: 'api' },
+      { label: 'deep', path: 'api/deep' },
+    ]);
+    expect(validSecretPath('database/postgres')).toBe(true);
+    expect(validSecretPath('/database/')).toBe(false);
+    expect(validSecretPath('a/../b')).toBe(false);
   });
 });
 

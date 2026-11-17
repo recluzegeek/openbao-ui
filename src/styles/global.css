@@ -311,6 +311,24 @@ button { cursor: pointer; }
 .activity-row__main { min-width: 0; }
 .activity-row__main > div { overflow-wrap: anywhere; }
 
+.folder-item { color: var(--color-text-secondary); }
+.folder-item .list-item__title { font-weight: 500; }
+.breadcrumbs { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.8rem; font-size: 0.78rem; color: var(--color-text-muted); }
+.breadcrumbs__part { display: inline-flex; align-items: center; gap: 0.3rem; }
+.breadcrumbs .strong { color: var(--color-text-primary); font-weight: 700; }
+.link-btn { border: 0; background: transparent; padding: 0; color: var(--color-primary); cursor: pointer; font: inherit; text-decoration: underline; }
+.link-btn:hover { color: var(--color-primary-700); }
+
+.compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.75rem; align-items: start; }
+.compare-col { border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; }
+.compare-col__head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.6rem 0.75rem; background: var(--color-background); border-bottom: 1px solid var(--color-border); }
+.compare-field { display: grid; gap: 0.15rem; padding: 0.5rem 0.75rem; border-bottom: 1px dashed var(--color-border); }
+.compare-field:last-child { border-bottom: 0; }
+.compare-field__key { font-size: 0.72rem; color: var(--color-text-secondary); overflow-wrap: anywhere; }
+.compare-field__value { font-size: 0.8rem; overflow-wrap: anywhere; }
+.compare-field__value.masked { letter-spacing: 0.1em; color: var(--color-text-muted); }
+.compare-field--missing { opacity: 0.5; }
+
 @media (max-width: 980px) {
   .app-shell { grid-template-columns: 1fr; }
   .sidebar { position: static; height: auto; flex-direction: row; align-items: center; overflow-x: auto; }

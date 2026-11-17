@@ -37,6 +37,45 @@ done
 # A second version so version history is visible on first load.
 api POST kv/data/ui-demo/env/development/web "$(jq -nc '{data:{APP_NAME:"console-demo",LOG_LEVEL:"trace",FEATURE_BANNER:"true",DATABASE_URL:"postgres://db.internal:5432/app",API_BASE_URL:"https://api.development.example.com",DEBUG_EXTRA:"only-in-v2"}}')"
 
+# Folder-model demo: nested KV paths that map to Project -> Environment -> Folder -> Secret.
+# UI metadata is stored on the KV v2 metadata endpoint (tags, comments, personal overrides).
+for env in development staging production; do
+  api POST "kv/data/ui-demo/env/$env/database/postgres" "$(jq -nc --arg env "$env" '{
+    data: {
+      HOST: (if $env=="production" then "pg-prod.internal" else "pg-"+$env+".internal" end),
+      PORT: "5432",
+      DATABASE: "app",
+      USERNAME: "app_user",
+      PASSWORD: (if $env=="production" then "prod-only-value" else "dev-only-value" end)
+    },
+    options: {cas: 0}
+  }')"
+  api POST "kv/metadata/ui-demo/env/$env/database/postgres" "$(jq -nc '{
+    custom_metadata: {
+      ui_tags: "[\"database\",\"critical\"]",
+      ui_comments: "{\"PASSWORD\":\"Rotate with the DBA team; never paste into tickets.\"}",
+      ui_overrides: "{\"ui-manager\":{\"PASSWORD\":\"manager-local-override\"}}"
+    }
+  }')"
+  api POST "kv/data/ui-demo/env/$env/api/gateway" "$(jq -nc --arg env "$env" '{
+    data: {
+      BASE_URL: (if $env=="production" then "https://api.example.com" else "https://api."+$env+".example.com" end),
+      UPSTREAM: "${database/postgres.HOST}:${database/postgres.PORT}",
+      TIMEOUT_MS: "5000"
+    },
+    options: {cas: 0}
+  }')"
+  api POST "kv/metadata/ui-demo/env/$env/api/gateway" "$(jq -nc '{custom_metadata:{ui_tags:"[\"api\",\"network\"]"}}')"
+  api POST "kv/data/ui-demo/env/$env/frontend/flags" "$(jq -nc --arg env "$env" '{
+    data: {
+      WELCOME_TEXT: "Welcome to ui-demo\nSecond line\nThird line",
+      ENABLED: (if $env=="production" then "false" else "true" end)
+    },
+    options: {cas: 0}
+  }')"
+  api POST "kv/metadata/ui-demo/env/$env/frontend/flags" "$(jq -nc '{custom_metadata:{ui_tags:"[\"frontend\"]"}}')"
+done
+
 api POST kv/data/ui-demo/creds/example-console "$(jq -nc '{data:{username:"demo-user",password:"demo-only-password",url:"https://console.example.com"}}')"
 api POST kv/data/_runbooks/ui-demo "$(jq -nc '{
   data: {
@@ -74,9 +113,12 @@ path "kv/metadata/ui-demo" { capabilities = ["list"] }
 path "kv/metadata/ui-demo/" { capabilities = ["list"] }
 path "kv/metadata/ui-demo/env/" { capabilities = ["list"] }
 path "kv/metadata/ui-demo/env/*" { capabilities = ["list"] }
+path "kv/metadata/ui-demo/env/**" { capabilities = ["list","read"] }
 path "kv/metadata/ui-demo/creds/" { capabilities = ["list"] }
 path "kv/data/ui-demo/env/development/*" { capabilities = ["read"] }
+path "kv/data/ui-demo/env/development/**" { capabilities = ["read"] }
 path "kv/data/ui-demo/env/staging/*" { capabilities = ["read"] }
+path "kv/data/ui-demo/env/staging/**" { capabilities = ["read"] }
 path "kv/data/ui-demo/creds/*" { capabilities = ["read"] }
 path "totp/code/ui-demo--*" { capabilities = ["read"] }
 ' '{policy:$policy}')"

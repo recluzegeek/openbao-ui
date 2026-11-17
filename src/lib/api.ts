@@ -248,6 +248,21 @@ export const bao = {
     const res = await bao.list(`kv/metadata/${encodeURIComponent(project)}/creds/`);
     return cleanKeys(res.data?.keys).map((k) => k.replace(/\/$/, ''));
   },
+  /** Recursive KV v2 metadata listing, used to build the folder tree. */
+  listSecretPaths: async (project: string, env: string) => {
+    const base = `kv/metadata/${encodeURIComponent(project)}/env/${encodeURIComponent(env)}/`;
+    const walk = async (prefix: string): Promise<string[]> => {
+      const res = await bao.list(`${base}${prefix}`);
+      const keys = cleanKeys(res.data?.keys);
+      const out: string[] = [];
+      for (const key of keys) {
+        if (key.endsWith('/')) out.push(...await walk(`${prefix}${key}`));
+        else out.push(`${prefix}${key}`);
+      }
+      return out;
+    };
+    return walk('');
+  },
   listRunbooks: async () => {
     const res = await bao.list('kv/metadata/_runbooks/');
     return cleanKeys(res.data?.keys).map((k) => k.replace(/\/$/, ''));
@@ -256,6 +271,9 @@ export const bao = {
   readSecret: (path: string, version?: number) =>
     request<KVResponse>(`kv/data/${path}`, version ? { params: { version: String(version) } } : {}),
   readMetadata: (path: string) => request<KVMetadataResponse>(`kv/metadata/${path}`),
+  /** Custom metadata (tags, comments, overrides) lives on the KV v2 metadata endpoint. */
+  writeCustomMetadata: (path: string, customMetadata: Record<string, string>) =>
+    request<void>(`kv/metadata/${path}`, { method: 'POST', data: { custom_metadata: customMetadata } }),
   writeSecret: (path: string, data: Record<string, unknown>, cas?: number) =>
     request<KVResponse>(`kv/data/${path}`, {
       method: 'POST',

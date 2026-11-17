@@ -108,7 +108,7 @@ export function RunbooksPage() {
           <p>Operational notes stored next to the secrets they describe. Open a runbook to see the steps and jump to its related secrets.</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          {selected && <Button variant="outlined" size="small" icon={<Database size={15} />} onClick={() => void navigate({ to: '/secrets', search: { project: selected, env: undefined, service: undefined } })}>
+          {selected && <Button variant="outlined" size="small" icon={<Database size={15} />} onClick={() => void navigate({ to: '/secrets', search: { project: selected, env: undefined, service: undefined, folder: undefined } })}>
             Browse {selected} secrets
           </Button>}
         </div>
@@ -184,7 +184,7 @@ export function RunbooksPage() {
                           <Link
                             key={`${secret.project}-${secret.env}-${secret.service}`}
                             to="/secrets"
-                            search={{ project: secret.project, env: secret.env, service: secret.service }}
+                            search={{ project: secret.project, env: secret.env, service: secret.service, folder: undefined }}
                             className="runbook-link"
                           >
                             <Database size={14} />

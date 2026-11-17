@@ -24,7 +24,8 @@ http://127.0.0.1:5173/secrets?project=ui-demo&env=staging&service=web
 ```
 kv/metadata/<project>/env/                       list environments
 kv/metadata/<project>/env/<env>/                 list services
-kv/data/<project>/env/<env>/<service>            read/write a secret
+kv/data/<project>/env/<env>/<path>               read/write a secret (path may contain folders)
+kv/metadata/<project>/env/<env>/<folder>/        list a folder (recursive traversal in bao.listSecretPaths)
 kv/data/<project>/creds/<name>                   shared credentials
 kv/data/_runbooks/<project>                      project runbook (steps, links, secrets)
 totp/keys/                                       list TOTP accounts
@@ -50,6 +51,9 @@ function adds the `kv/data/` prefix itself. Create passes CAS `0`; edit passes t
 
 - `field-<name>` — a secret field row
 - `edit-row-<name>` — a row in the secret editor dialog
+- `folder-<path>` — a folder in the secrets tree (`folder-root` for the root)
+- `secret-<path>` — a secret entry in the current folder
+- `compare-<env>-<key>` — a field cell in the side-by-side environment view
 - `code-<account>` / `code-value-<account>` — TOTP card and value
 - copy buttons use `data-testid="copy-<label>"`
 

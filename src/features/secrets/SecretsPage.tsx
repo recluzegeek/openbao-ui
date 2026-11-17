@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowRightLeft,
   BookOpen,
+  ChevronRight,
+  Columns3,
   Database,
   Eye,
   EyeOff,
   FileJson,
+  Folder,
   FolderOpen,
   History,
   KeyRound,
@@ -22,16 +25,17 @@ import { bao, type CapabilitiesMap } from '@/lib/api';
 import { can, deniedReason } from '@/lib/capabilities';
 import { envRank, secretApiPath, secretPath } from '@/lib/baoPaths';
 import { envFile, formatWhen, mask } from '@/lib/format';
-import { dataFromRows, rowsFromData, validateRows, validSecretName, type FieldRow } from '@/lib/secretForm';
+import { dataFromRows, rowsFromData, validateRows, type FieldRow } from '@/lib/secretForm';
+import { buildSecretTree, folderBreadcrumbs, folderInTree, secretName, validSecretPath, type SecretTreeFolder } from '@/lib/secretTree';
 import {
-  capabilityPathsForSecret,
+  capabilityPathsForFolder,
   useCapabilities,
   useCredentials,
   useEnvironments,
   useProjects,
   useSecret,
   useSecretMetadata,
-  useServices,
+  useSecretPaths,
 } from '@/lib/queries';
 import { useToast } from '@/lib/toast';
 import { useClipboard } from '@/lib/useClipboard';
@@ -39,6 +43,7 @@ import { Badge } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
 import { CopyButton, Dialog, EmptyState, EnvBadge, ErrorState } from '@/components/common/Extras';
 import { RecentActivityPanel } from './RecentActivityPanel';
+import { CompareEnvsPanel } from './CompareEnvsPanel';
 
 type Search = Record<string, string | undefined>;
 
@@ -131,6 +136,30 @@ function CredentialsPanel({ project, caps }: { project: string; caps: Capabiliti
   );
 }
 
+function FolderRows({ folder, current, depth, onSelect }: {
+  folder: SecretTreeFolder;
+  current: string;
+  depth: number;
+  onSelect: (path: string) => void;
+}): ReactElement[] {
+  return folder.folders.flatMap((child) => [
+    <button
+      key={`folder-${child.path}`}
+      className={`list-item folder-item ${current === child.path ? 'selected' : ''}`}
+      style={{ paddingLeft: `calc(var(--spacing-md) + ${depth * 14}px)` }}
+      onClick={() => onSelect(child.path)}
+      data-testid={`folder-${child.path}`}
+    >
+      <Folder size={16} />
+      <span className="list-item__main">
+        <span className="list-item__title">{child.name}</span>
+        <span className="list-item__sub">{child.folders.length + child.secrets.length} items</span>
+      </span>
+    </button>,
+    ...FolderRows({ folder: child, current, depth: depth + 1, onSelect }),
+  ]);
+}
+
 export function SecretsPage() {
   const navigate = useNavigate({ from: '/secrets' });
   const search = useRouterState({ select: (state) => state.location.search }) as Search;
@@ -143,12 +172,16 @@ export function SecretsPage() {
   const environments = useEnvironments(project);
   const envs = useMemo(() => [...(environments.data ?? [])].sort(envRank), [environments.data]);
   const [env, setEnv] = useState<string | undefined>(search.env);
-  const services = useServices(project, env);
+  const pathsQ = useSecretPaths(project, env);
+  const tree = useMemo(() => buildSecretTree(pathsQ.data ?? []), [pathsQ.data]);
+  const allPaths = useMemo(() => pathsQ.data ?? [], [pathsQ.data]);
+  const [folder, setFolder] = useState<string>(search.folder ?? '');
   const [service, setService] = useState<string | undefined>(search.service);
   const [filter, setFilter] = useState('');
   const [tab, setTab] = useState<'env' | 'creds'>('env');
   const [version, setVersion] = useState<number | undefined>(undefined);
   const [promoteTo, setPromoteTo] = useState<string | null>(null);
+  const [showCompare, setShowCompare] = useState(false);
   const [editor, setEditor] = useState<{
     mode: 'create' | 'edit';
     name: string;
@@ -164,34 +197,47 @@ export function SecretsPage() {
   }, [projects.data, project, search.project]);
 
   useEffect(() => {
-    if (!env && envs.length) setEnv(search.env && envs.includes(search.env) ? search.env : envs[0]);
-  }, [envs, env, search.env]);
+    if (!env && envs.length) {
+      setEnv(search.env && envs.includes(search.env) ? search.env : envs[0]);
+      setFolder(search.folder ?? '');
+      setService(search.service);
+    }
+  }, [envs, env, search.env, search.folder, search.service]);
 
   useEffect(() => {
-    if (!service && services.data?.length) setService(search.service ?? services.data[0]);
-  }, [services.data, service, search.service]);
+    if (!allPaths.length || service) return;
+    const inFolder = allPaths.filter((path) => {
+      const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+      return parent === folder;
+    });
+    if (!inFolder.length) return;
+    const preferred = search.service && inFolder.includes(search.service) ? search.service : inFolder[0];
+    setService(preferred);
+  }, [allPaths, service, folder, search.service]);
 
   useEffect(() => {
-    if (project && env && service) {
+    if (project && env) {
       void navigate({
         to: '/secrets',
-        search: { project, env, service },
+        search: { project, env, service, folder: folder || undefined },
         replace: true,
       });
     }
-  }, [project, env, service, navigate]);
+  }, [project, env, service, folder, navigate]);
 
-  const capsQ = useCapabilities(capabilityPathsForSecret(project, env, service, envs));
+  const capsQ = useCapabilities(capabilityPathsForFolder(project, env, folder, allPaths));
   const caps = capsQ.data;
   const secretQ = useSecret(project, env, service, version);
   const metadataQ = useSecretMetadata(project, env, service);
 
   const currentPath = project && env && service ? secretPath(project, env, service) : '';
   const apiPath = project && env && service ? secretApiPath(project, env, service) : '';
-  const newPath = project && env ? `kv/data/${project}/env/${env}/__new__` : '';
+  const newPath = project && env ? `kv/data/${project}/env/${env}/${folder}/__new__` : '';
   const writable = can(caps, currentPath, 'update') || can(caps, currentPath, 'create');
   const canCreate = can(caps, newPath, 'create') || can(caps, newPath, 'update');
-  const filteredServices = (services.data ?? []).filter((name) => name.toLowerCase().includes(filter.toLowerCase()));
+  const folderNode = folderInTree(tree, folder) ?? tree;
+  const filteredSecrets = folderNode.secrets.filter((path) => secretName(path).toLowerCase().includes(filter.toLowerCase()));
+  const crumbs = folderBreadcrumbs(folder);
 
   function updateRow(id: string, patch: Partial<FieldRow>) {
     setEditor((current) => current && {
@@ -209,7 +255,7 @@ export function SecretsPage() {
 
   async function openCreate() {
     setEditorError(null);
-    setEditor({ mode: 'create', name: '', rows: [{ id: 'new-0', key: '', value: '' }], cas: 0 });
+    setEditor({ mode: 'create', name: folder ? `${folder}/` : '', rows: [{ id: 'new-0', key: '', value: '' }], cas: 0 });
   }
 
   async function openEdit() {
@@ -232,8 +278,8 @@ export function SecretsPage() {
   async function saveEditor() {
     if (!project || !env || !editor) return;
     const name = editor.name.trim();
-    if (!validSecretName(name)) {
-      setEditorError('Give the secret a name (a single path segment, without "/").');
+    if (!validSecretPath(name)) {
+      setEditorError('Give the secret a path relative to this environment, for example database/postgres.');
       return;
     }
     const invalid = validateRows(editor.rows);
@@ -253,6 +299,7 @@ export function SecretsPage() {
         `kv/data/${project}/env/${env}/${name} · version ${editor.cas + 1}`,
       );
       setService(name);
+      setFolder(name.includes('/') ? name.slice(0, name.lastIndexOf('/')) : '');
       setVersion(undefined);
       setEditor(null);
     } catch (error) {
@@ -284,6 +331,9 @@ export function SecretsPage() {
           <p>Pick a project and environment. Values are masked until you ask to see them.</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <Button variant={showCompare ? 'primary' : 'outlined'} size="small" icon={<Columns3 size={15} />} onClick={() => setShowCompare((value) => !value)} disabled={!service}>
+            Compare envs
+          </Button>
           <Button variant="outlined" size="small" icon={<BookOpen size={15} />} onClick={() => void navigate({ to: '/runbooks', search: { project: project ?? undefined } })}>
             Runbook
           </Button>
@@ -340,45 +390,85 @@ export function SecretsPage() {
           <div className="panel">
             <div className="panel__head">
               <FolderOpen size={17} />
-              <h3>{service ? `${project}/env/${env}` : 'Services'}</h3>
-              <Badge size="small">{filteredServices.length}</Badge>
+              <h3>Folders</h3>
+              <Badge size="small">{filteredSecrets.length}</Badge>
               <Button
                 size="small"
                 variant="outlined"
                 icon={<Plus size={14} />}
                 onClick={() => void openCreate()}
                 disabled={!canCreate}
-                title={canCreate ? 'Create a secret in this environment' : 'Your token cannot create secrets here'}
+                title={canCreate ? 'Create a secret in this folder' : 'Your token cannot create secrets here'}
               >
                 New secret
               </Button>
             </div>
-            {services.isLoading && <div className="state"><div className="spinner" /></div>}
-            {services.isError && <ErrorState error={services.error} />}
-            {!services.isLoading && filteredServices.length === 0 && (
-              <EmptyState icon={<FolderOpen size={26} />} title="Nothing here yet">No secrets under this environment, or your token cannot list them.</EmptyState>
-            )}
-            {filteredServices.map((name) => (
-              <button key={name} className={`list-item ${service === name ? 'selected' : ''}`} onClick={() => { setService(name); setVersion(undefined); }}>
-                <Database size={16} />
+            <div style={{ padding: 0 }}>
+              {pathsQ.isLoading && <div className="state"><div className="spinner" /></div>}
+              {pathsQ.isError && <ErrorState error={pathsQ.error} onRetry={() => void pathsQ.refetch()} />}
+              <button
+                className={`list-item folder-item ${folder === '' ? 'selected' : ''}`}
+                onClick={() => { setFolder(''); setService(undefined); setVersion(undefined); }}
+                data-testid="folder-root"
+              >
+                <FolderOpen size={16} />
                 <span className="list-item__main">
-                  <span className="list-item__title">{name}</span>
-                  <span className="list-item__sub">kv/data/{project}/env/{env}/{name}</span>
+                  <span className="list-item__title">Root</span>
+                  <span className="list-item__sub">{tree.secrets.length} secrets · {tree.folders.length} folders</span>
                 </span>
               </button>
-            ))}
+              <FolderRows folder={tree} current={folder} depth={0} onSelect={(path) => { setFolder(path); setService(undefined); setVersion(undefined); }} />
+              <div className="divider" style={{ margin: '0.5rem var(--spacing-md)' }} />
+              <div className="section-title" style={{ padding: '0 var(--spacing-md)' }}>
+                Secrets in {folder || 'root'} ({filteredSecrets.length})
+              </div>
+              {!pathsQ.isLoading && filteredSecrets.length === 0 && (
+                <p className="small muted" style={{ padding: '0 var(--spacing-md)' }}>No secrets in this folder.</p>
+              )}
+              {filteredSecrets.map((path) => (
+                <button
+                  key={path}
+                  className={`list-item ${service === path ? 'selected' : ''}`}
+                  onClick={() => { setService(path); setVersion(undefined); }}
+                  data-testid={`secret-${path}`}
+                >
+                  <Database size={16} />
+                  <span className="list-item__main">
+                    <span className="list-item__title">{secretName(path)}</span>
+                    <span className="list-item__sub">{path}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="grid" style={{ gap: '1rem' }}>
+            {showCompare && service && project && (
+              <CompareEnvsPanel project={project} path={service} envs={envs} />
+            )}
             <div className="panel">
               <div className="panel__head">
                 <KeyRound size={17} />
-                <h3>{service ?? 'Select a secret'}</h3>
+                <h3>{service ? secretName(service) : 'Select a secret'}</h3>
                 {env && <EnvBadge env={env} />}
                 {version !== undefined && <Badge variant="info" size="small">v{version}</Badge>}
                 {!writable && currentPath && <Badge variant="outline" size="small"><Lock size={12} /> read-only</Badge>}
               </div>
               <div className="panel__body">
+                {service && (
+                  <nav className="breadcrumbs" aria-label="Secret location">
+                    <span className="mono">{project}</span>
+                    <ChevronRight size={13} />
+                    <span className="mono">{env}</span>
+                    {crumbs.map((crumb) => (
+                      <span key={crumb.path || 'root'} className="breadcrumbs__part">
+                        <ChevronRight size={13} />
+                        <button className="link-btn mono" onClick={() => { setFolder(crumb.path); setService(undefined); }}>{crumb.label}</button>
+                      </span>
+                    ))}
+                    {service && <><ChevronRight size={13} /><span className="mono strong">{secretName(service)}</span></>}
+                  </nav>
+                )}
                 {!service && <p className="muted">Select a secret from the list to see its fields.</p>}
                 {service && !writable && caps && <div className="notice warning small">{deniedReason(caps, currentPath, 'update')}</div>}
                 {secretQ.isLoading && <div className="state"><div className="spinner" /></div>}
@@ -485,16 +575,16 @@ export function SecretsPage() {
         >
           {editor.mode === 'create' ? (
             <div className="field">
-              <label htmlFor="secret-name">Secret name</label>
+              <label htmlFor="secret-name">Secret path (relative to environment)</label>
               <input
                 id="secret-name"
                 className="mono"
                 autoFocus
-                placeholder="e.g. web"
+                placeholder="e.g. database/postgres"
                 value={editor.name}
                 onChange={(event) => setEditor({ ...editor, name: event.target.value })}
               />
-              <p className="small muted">Stored at <span className="mono">kv/data/{project}/env/{env}/&lt;name&gt;</span></p>
+              <p className="small muted">Stored at <span className="mono">kv/data/{project}/env/{env}/&lt;path&gt;</span></p>
             </div>
           ) : (
             <p className="small muted">

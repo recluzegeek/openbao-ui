@@ -23,9 +23,12 @@ The fork remains useful as a design reference; it is a poor base for a small, re
 
 - **Sign in:** token or userpass against any OpenBao address/namespace; sealed-server unseal flow.
   OIDC is visibly deferred rather than faked.
-- **Secrets:** project → environment → service browsing, masked-by-default field reveal/copy,
-  shared credentials, version history, safe `.env` copy, and promotion between environments with a
-  destination preview and confirmation.
+- **Secrets:** project → environment → **folder** → secret browsing, with a folder tree,
+  breadcrumbs and deep links. Folders are path segments under `kv/data/<project>/env/<env>/`; the
+  original flat secrets (`web`, `billing`) remain at the root. Masked-by-default field reveal/copy,
+  shared credentials, version history, safe `.env` copy, and promotion with a destination preview.
+- **Environments side by side:** a compare panel shows the same secret path across dev/staging/prod
+  in columns, with masked values, version stamps and clear "absent in this environment" markers.
 - **Secret create/edit with CAS:** add or edit a secret through a structured field editor. Creates
   use check-and-set `0` (fails if the name is taken); edits use the current version as CAS, so a
   concurrent change produces a conflict instead of a silent overwrite. Both actions are capability

@@ -38,6 +38,7 @@ const secretsRoute = createRoute({
     project: typeof search.project === 'string' ? search.project : undefined,
     env: typeof search.env === 'string' ? search.env : undefined,
     service: typeof search.service === 'string' ? search.service : undefined,
+    folder: typeof search.folder === 'string' ? search.folder : undefined,
   }),
 });
 

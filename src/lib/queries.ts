@@ -43,6 +43,15 @@ export function useCredentials(project?: string) {
   });
 }
 
+export function useSecretPaths(project?: string, env?: string) {
+  return useQuery({
+    queryKey: ['secret-paths', project, env],
+    queryFn: () => bao.listSecretPaths(project!, env!),
+    enabled: Boolean(project && env),
+    staleTime: 30_000,
+  });
+}
+
 export function useSecret(project?: string, env?: string, service?: string, version?: number) {
   return useQuery({
     queryKey: ['secret', project, env, service, version ?? 'latest'],
@@ -98,6 +107,25 @@ export function useRunbook(project?: string) {
     enabled: Boolean(project),
     staleTime: 30_000,
   });
+}
+
+/** Capabilities needed for folder browsing, secret reads, creates and metadata writes. */
+export function capabilityPathsForFolder(project?: string, env?: string, folder = '', allPaths: string[] = []) {
+  if (!project || !env) return [];
+  const metaBase = `kv/metadata/${project}/env/${env}`;
+  const dataBase = `kv/data/${project}/env/${env}`;
+  const folders = new Set<string>(folder ? [folder] : ['']);
+  for (const path of allPaths) {
+    const slash = path.lastIndexOf('/');
+    if (slash !== -1) folders.add(path.slice(0, slash));
+  }
+  return [
+    `${metaBase}/`,
+    ...[...folders].map((name) => `${metaBase}/${name}/`),
+    `${dataBase}/${folder}/__new__`,
+    ...allPaths.map((path) => `${dataBase}/${path}`),
+    ...allPaths.map((path) => `${metaBase}/${path}`),
+  ];
 }
 
 export function runbookCapabilityPaths(projects: string[]) {
