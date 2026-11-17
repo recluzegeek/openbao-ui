@@ -14,7 +14,6 @@ import {
   FileJson,
   Folder,
   FolderOpen,
-  History,
   KeyRound,
   Link2,
   Lock,
@@ -61,6 +60,7 @@ import { CopyButton, Dialog, EmptyState, EnvBadge, ErrorState } from '@/componen
 import { RecentActivityPanel } from './RecentActivityPanel';
 import { CompareEnvsPanel } from './CompareEnvsPanel';
 import { FieldTable } from './FieldTable';
+import { VersionHistoryPanel } from './VersionHistoryPanel';
 
 type Search = Record<string, string | undefined>;
 
@@ -724,28 +724,17 @@ export function SecretsPage() {
               </div>
             </div>
 
-            <div className="panel">
-              <div className="panel__head"><History size={17} /><h3>Version history</h3></div>
-              <div className="panel__body">
-                {metadataQ.isLoading && <div className="state"><div className="spinner" /></div>}
-                {metadataQ.data && Object.entries(metadataQ.data.data.versions)
-                  .sort(([a], [b]) => Number(b) - Number(a))
-                  .slice(0, 8)
-                  .map(([v, meta]) => (
-                    <button
-                      key={v}
-                      className={`list-item ${version === Number(v) || (version === undefined && Number(v) === metadataQ.data?.data.current_version) ? 'selected' : ''}`}
-                      onClick={() => setVersion(Number(v) === metadataQ.data?.data.current_version ? undefined : Number(v))}
-                    >
-                      <span className="list-item__main">
-                        <span className="list-item__title">Version {v}{meta.destroyed ? ' · destroyed' : ''}</span>
-                        <span className="list-item__sub">{formatWhen(meta.created_time)}</span>
-                      </span>
-                      {Number(v) === metadataQ.data.data.current_version && <Badge variant="success" size="small">current</Badge>}
-                    </button>
-                  ))}
-              </div>
-            </div>
+            {project && env && service && (
+              <VersionHistoryPanel
+                project={project}
+                env={env}
+                service={service}
+                apiPath={apiPath}
+                selectedVersion={version}
+                onSelectVersion={setVersion}
+                canRestore={writable}
+              />
+            )}
 
             <RecentActivityPanel path={apiPath || undefined} />
           </div>

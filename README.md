@@ -28,7 +28,11 @@ The fork remains useful as a design reference; it is a poor base for a small, re
   original flat secrets (`web`, `billing`) remain at the root. Masked-by-default field reveal/copy,
   shared credentials, version history, safe `.env` copy, and promotion with a destination preview.
 - **Environments side by side:** a compare panel shows the same secret path across dev/staging/prod
-  in columns, with masked values, version stamps and clear "absent in this environment" markers.
+  in columns, with masked values, version stamps, "differs" markers, an only-differences filter and
+  clear "absent in this environment" markers.
+- **Version history and rollback:** pick any KV v2 version for a point-in-time view, choose two
+  versions for a masked field-by-field diff (added/removed/changed), see the actor from the local
+  audit log when available, and restore an older version as a new CAS-protected write.
 - **Real secrets editor:** spreadsheet-style field table with inline edit, per-field reveal, copy,
   multi-line values and one-click row removal. Bulk paste, `.env`/JSON/YAML/TSV import (file or
   paste), matching export, and “from another environment” value staging are all available in the
@@ -141,5 +145,4 @@ driven by real usage. Audit is represented only by the read-only recent-activity
 
 1. OIDC login with callback + role selection — unblocks managers in OIDC-based teams.
 2. A proper audit settings/explorer view (the current panel is a local, read-only slice).
-3. Secret deletion and version rollback with explicit confirmation and capability gating.
-4. Component extraction into a small shared package if another community UI wants to reuse it.
+3. Component extraction into a small shared package if another community UI wants to reuse it.

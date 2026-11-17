@@ -47,8 +47,7 @@ for env in development staging production; do
       DATABASE: "app",
       USERNAME: "app_user",
       PASSWORD: (if $env=="production" then "prod-only-value" else "dev-only-value" end)
-    },
-    options: {cas: 0}
+    }
   }')"
   api POST "kv/metadata/ui-demo/env/$env/database/postgres" "$(jq -nc '{
     custom_metadata: {
@@ -62,18 +61,39 @@ for env in development staging production; do
       BASE_URL: (if $env=="production" then "https://api.example.com" else "https://api."+$env+".example.com" end),
       UPSTREAM: "${database/postgres.HOST}:${database/postgres.PORT}",
       TIMEOUT_MS: "5000"
-    },
-    options: {cas: 0}
+    }
   }')"
   api POST "kv/metadata/ui-demo/env/$env/api/gateway" "$(jq -nc '{custom_metadata:{ui_tags:"[\"api\",\"network\"]"}}')"
   api POST "kv/data/ui-demo/env/$env/frontend/flags" "$(jq -nc --arg env "$env" '{
     data: {
       WELCOME_TEXT: "Welcome to ui-demo\nSecond line\nThird line",
       ENABLED: (if $env=="production" then "false" else "true" end)
-    },
-    options: {cas: 0}
+    }
   }')"
   api POST "kv/metadata/ui-demo/env/$env/frontend/flags" "$(jq -nc '{custom_metadata:{ui_tags:"[\"frontend\"]"}}')"
+done
+
+# A later version so version history, diffs and rollback have a realistic fixture.
+# Fields are added/changed rather than removed so promotion stays simple.
+for env in development staging; do
+  api POST "kv/data/ui-demo/env/$env/api/gateway" "$(jq -nc --arg env "$env" '{
+    data: {
+      BASE_URL: ("https://api."+$env+".example.com"),
+      UPSTREAM: "${database/postgres.HOST}:${database/postgres.PORT}",
+      TIMEOUT_MS: "8000",
+      RETRIES: "3"
+    }
+  }')"
+  api POST "kv/data/ui-demo/env/$env/database/postgres" "$(jq -nc --arg env "$env" '{
+    data: {
+      HOST: ("pg-"+$env+".internal"),
+      PORT: "5432",
+      DATABASE: "app",
+      USERNAME: "app_user",
+      PASSWORD: "dev-only-value",
+      MAX_CONNECTIONS: "20"
+    }
+  }')"
 done
 
 api POST kv/data/ui-demo/creds/example-console "$(jq -nc '{data:{username:"demo-user",password:"demo-only-password",url:"https://console.example.com"}}')"

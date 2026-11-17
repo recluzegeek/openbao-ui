@@ -58,6 +58,8 @@ function adds the `kv/data/` prefix itself. Create passes CAS `0`; edit passes t
 - `folder-<path>` — a folder in the secrets tree (`folder-root` for the root)
 - `secret-<path>` — a secret entry in the current folder
 - `compare-<env>-<key>` — a field cell in the side-by-side environment view
+- `version-<n>` — a KV version row; `version-diff` — the two-version diff table
+- `diff-<key>` — a field row in the version diff
 - `code-<account>` / `code-value-<account>` — TOTP card and value
 - copy buttons use `data-testid="copy-<label>"`
 

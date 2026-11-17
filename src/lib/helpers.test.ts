@@ -9,6 +9,7 @@ import { actorLabel, operationLabel } from './audit';
 import { buildSecretTree, folderBreadcrumbs, folderInTree, validSecretPath } from './secretTree';
 import { buildReferenceLookup, findReferences, parseKeyValueText, resolveReferences, serializeKeyValue } from './secretFormats';
 import { effectiveValue, mergeAnnotations, overridesFor, parseAnnotations, withOverridesFor } from './secretMetadata';
+import { actorForVersion, diffData } from './secretDiff';
 
 describe('OpenBao paths', () => {
   it('builds the POC KV layout', () => {
@@ -177,6 +178,29 @@ describe('secret annotations', () => {
     expect(parseAnnotations({ ui_tags: 'not json', ui_comments: '[]' })).toEqual({
       tags: [], note: '', comments: {}, overrides: {},
     });
+  });
+});
+
+describe('version diffs', () => {
+  it('classifies added, removed, changed and unchanged fields', () => {
+    const diff = diffData({ HOST: 'old', GONE: 'x', SAME: 'y' }, { HOST: 'new', SAME: 'y', FRESH: 'z' });
+    expect(diff.map((item) => [item.key, item.status])).toEqual([
+      ['FRESH', 'added'],
+      ['GONE', 'removed'],
+      ['HOST', 'changed'],
+      ['SAME', 'same'],
+    ]);
+    expect(diff.find((item) => item.key === 'HOST')).toEqual({ key: 'HOST', status: 'changed', left: 'old', right: 'new' });
+  });
+
+  it('attributes a version time to the nearest write in the audit log', () => {
+    const entries = [
+      { time: '2026-11-17T10:00:00Z', operation: 'read', displayName: 'reader' },
+      { time: '2026-11-17T10:01:00Z', operation: 'update', displayName: 'root' },
+      { time: '2026-11-17T10:30:00Z', operation: 'update', displayName: 'other' },
+    ];
+    expect(actorForVersion(entries, '2026-11-17T10:01:10Z')).toBe('root');
+    expect(actorForVersion(entries, '2026-11-17T09:00:00Z')).toBeUndefined();
   });
 });
 

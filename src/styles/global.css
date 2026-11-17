@@ -328,6 +328,27 @@ button { cursor: pointer; }
 .compare-field__value { font-size: 0.8rem; overflow-wrap: anywhere; }
 .compare-field__value.masked { letter-spacing: 0.1em; color: var(--color-text-muted); }
 .compare-field--missing { opacity: 0.5; }
+.compare-field--different { background: var(--color-primary-light); }
+.compare-field__badge { margin-left: 0.35rem; padding: 0.05rem 0.3rem; border-radius: var(--radius-sm); background: var(--color-primary); color: var(--color-surface); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.03em; }
+
+.version-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.4rem 0.2rem; border-bottom: 1px dashed var(--color-border); }
+.version-row:last-of-type { border-bottom: 0; }
+.version-row.selected { background: var(--color-primary-light); border-radius: var(--radius-md); }
+.version-row__main { display: grid; gap: 0.1rem; flex: 1; min-width: 0; padding: 0.25rem; border: 0; background: transparent; text-align: left; color: inherit; cursor: pointer; }
+.version-row__actions { display: flex; align-items: center; gap: 0.25rem; }
+.mini-btn { display: inline-grid; place-items: center; min-width: 26px; height: 26px; padding: 0 0.25rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-background); color: var(--color-text-secondary); font-size: 0.72rem; cursor: pointer; }
+.mini-btn:hover, .mini-btn.active { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-light); }
+.diff-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+.diff-head h4 { margin: 0; font-size: 0.85rem; }
+.diff-table { border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; }
+.diff-table__head, .diff-table__row { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(0, 1.3fr) minmax(0, 1.3fr); gap: 0.4rem; align-items: start; padding: 0.45rem 0.55rem; border-bottom: 1px dashed var(--color-border); }
+.diff-table__head { background: var(--color-background); font-size: 0.7rem; color: var(--color-text-muted); text-transform: uppercase; }
+.diff-table__row:last-child { border-bottom: 0; }
+.diff-table__row > span { font-size: 0.75rem; overflow-wrap: anywhere; }
+.diff-table__row .masked { color: var(--color-text-muted); letter-spacing: 0.08em; }
+.diff-table__row--changed { background: var(--color-primary-light); }
+.diff-table__row--added { box-shadow: inset 3px 0 0 var(--color-primary-300); }
+.diff-table__row--removed { box-shadow: inset 3px 0 0 var(--color-secondary-300); opacity: 0.75; }
 
 .secret-field__comment { display: inline-flex; align-items: center; gap: 0.25rem; margin-left: 0.5rem; font-size: 0.72rem; color: var(--color-text-muted); }
 .secret-field__resolved { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.72rem; color: var(--color-primary); overflow-wrap: anywhere; }
