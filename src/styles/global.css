@@ -52,7 +52,8 @@ button { cursor: pointer; }
   height: 100vh;
 }
 
-.brand { display: flex; align-items: center; gap: 0.7rem; padding: 0 0.4rem; }
+.brand { display: flex; align-items: center; gap: 0.7rem; padding: 0 0.4rem; color: inherit; text-decoration: none; }
+.brand:hover .brand__name { color: var(--color-primary); }
 .brand__mark {
   width: 34px; height: 34px; border-radius: 10px;
   display: grid; place-items: center;
@@ -77,20 +78,33 @@ button { cursor: pointer; }
 .nav-link svg { flex: none; }
 .nav-link__badge { margin-left: auto; }
 
-.sidebar__footer { margin-top: auto; display: grid; gap: 0.5rem; }
+.sidebar__footer { margin-top: auto; display: grid; gap: 0.5rem; min-width: 0; }
 .identity-chip {
   display: flex; align-items: center; gap: 0.6rem;
   padding: 0.6rem; border-radius: var(--radius-lg);
   border: 1px solid var(--color-border);
+  width: 100%; min-width: 0; max-width: 100%;
 }
 .identity-chip__avatar {
   width: 30px; height: 30px; border-radius: 50%; flex: none;
   background: var(--color-secondary-light); color: var(--color-secondary);
   display: grid; place-items: center; font-weight: 700;
 }
-.identity-chip__meta { min-width: 0; }
+.identity-chip__meta { min-width: 0; flex: 1; }
+.identity-chip > .icon-btn { flex: none; }
 .identity-chip__name { font-size: 0.85rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.identity-chip__sub { font-size: 0.72rem; color: var(--color-text-muted); }
+.identity-chip__sub { font-size: 0.72rem; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.server-chip {
+  display: flex; align-items: center; gap: 0.45rem; min-width: 0;
+  padding: 0.5rem 0.6rem; border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg); font-size: 0.78rem; color: var(--color-text-secondary);
+}
+.server-chip__host { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.server-chip__dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--color-text-muted); }
+.server-chip__dot--healthy { background: #12b76a; }
+.server-chip__dot--sealed { background: #f79009; }
+.server-chip__dot--unreachable { background: var(--color-red); }
 .session-countdown { color: var(--color-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .session-countdown--urgent { color: var(--color-error, #b42318); font-weight: 600; }
 
@@ -114,7 +128,7 @@ button { cursor: pointer; }
 }
 .namespace-control input[aria-invalid='true'] { border-color: var(--color-red); }
 
-.page { padding: var(--spacing-xl); max-width: 1500px; width: 100%; }
+.page { padding: var(--spacing-xl); max-width: 1600px; width: 100%; margin: 0 auto; }
 .page__header { display: flex; align-items: flex-end; gap: var(--spacing-md); flex-wrap: wrap; margin-bottom: var(--spacing-lg); }
 .page__header > div:first-child { margin-right: auto; }
 .page__header p { color: var(--color-text-secondary); max-width: 70ch; font-size: 0.9rem; }
@@ -129,8 +143,8 @@ button { cursor: pointer; }
 .field label, .control-bar label { font-size: 0.75rem; font-weight: 600; color: var(--color-text-secondary); }
 .field select, .field input, .control-bar select, .control-bar input {
   width: 100%; padding: 0.55rem 0.7rem; border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg); background: var(--color-background);
-  color: var(--color-text-primary);
+  border-radius: 8px; background: var(--color-background);
+  color: var(--color-text-primary); min-height: 40px;
 }
 .field select:hover, .control-bar select:hover { border-color: var(--color-border-hover); }
 .search { position: relative; flex: 1; min-width: 220px; }
@@ -215,6 +229,16 @@ button { cursor: pointer; }
 .list-item__main { min-width: 0; flex: 1; }
 .list-item__title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .list-item__sub { font-size: 0.75rem; color: var(--color-text-muted); }
+.list-item__count { margin-left: auto; flex: none; font-size: 0.72rem; color: var(--color-text-muted); white-space: nowrap; }
+
+/* Breadcrumb strip replaces the old Root row in the folder pane. */
+.folder-crumbs {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.15rem;
+  padding: 0.5rem var(--spacing-md); border-bottom: 1px solid var(--color-border);
+}
+.folder-crumbs__part { display: inline-flex; align-items: center; gap: 0.15rem; }
+.folder-crumbs .link-btn { text-decoration: none; }
+.folder-crumbs .link-btn[aria-current='location'] { color: var(--color-text-primary); font-weight: 700; }
 
 .secret-field {
   display: grid; grid-template-columns: minmax(130px, 0.8fr) minmax(0, 1.5fr) auto;
@@ -336,6 +360,14 @@ button { cursor: pointer; }
   border: 0; background: none; color: inherit; font: inherit; cursor: pointer;
 }
 .layout-issues-chip .rotate { transform: rotate(180deg); }
+.icon-btn .rotate { transform: rotate(180deg); }
+.layout-panel .panel__head { padding: 0.55rem var(--spacing-md); }
+.skeleton {
+  display: block; height: 12px; border-radius: 6px;
+  background: linear-gradient(90deg, var(--color-border) 25%, var(--color-background) 50%, var(--color-border) 75%);
+  background-size: 200% 100%; animation: skeleton-shimmer 1.2s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer { to { background-position: -200% 0; } }
 .notice.error { background: var(--color-red-100); border-color: var(--color-red-300); color: var(--color-red-800); }
 .notice.success { background: var(--color-primary-light); border-color: var(--color-primary); color: var(--color-text-primary); }
 
@@ -669,6 +701,21 @@ button { cursor: pointer; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+
+/* Laptop widths: collapse the sidebar to an icon rail so the work gets the room. */
+@media (max-width: 1279px) and (min-width: 981px) {
+  .app-shell { grid-template-columns: 72px 1fr; }
+  .sidebar { padding: var(--spacing-md) 0.5rem; align-items: center; }
+  .brand { padding: 0; justify-content: center; }
+  .brand > div:last-child,
+  .nav-group__label,
+  .nav-link span,
+  .identity-chip__meta,
+  .server-chip__host { display: none; }
+  .nav-link { justify-content: center; padding: 0.65rem; }
+  .identity-chip { flex-direction: column; gap: 0.25rem; padding: 0.4rem; }
+  .server-chip { justify-content: center; padding: 0.4rem; }
 }
 
 @media (max-width: 980px) {

@@ -62,7 +62,6 @@ export function TrashPage() {
     <div className="grid" style={{ gap: '1.1rem' }}>
       <div className="page__header">
         <div>
-          <h2>Trash</h2>
           <p>Soft-deleted versions recoverable from KV metadata. Values are never read or shown here.</p>
         </div>
       </div>

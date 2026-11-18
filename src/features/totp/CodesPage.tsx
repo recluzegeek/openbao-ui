@@ -188,7 +188,6 @@ export function CodesPage() {
     <div className="grid" style={{ gap: '1.1rem' }}>
       <div className="page__header">
         <div>
-          <h2>One-time codes</h2>
           <p>Codes for shared accounts. Seeds stay inside OpenBao — nobody can read them back.</p>
         </div>
         <Button size="small" icon={<Plus size={15} />} onClick={() => setShowAdd(true)}>Add account</Button>

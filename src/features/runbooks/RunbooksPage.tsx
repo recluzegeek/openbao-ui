@@ -105,7 +105,6 @@ export function RunbooksPage() {
     <div className="grid" style={{ gap: '1.1rem' }}>
       <div className="page__header">
         <div>
-          <h2>Runbooks</h2>
           <p>Operational notes stored next to the secrets they describe. Open a runbook to see the steps and jump to its related secrets.</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>

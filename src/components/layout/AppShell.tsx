@@ -15,7 +15,6 @@ const links = [
   { to: '/welcome' as const, label: 'Getting started', icon: Compass },
   { to: '/secrets' as const, label: 'Secrets', icon: KeyRound },
   { to: '/trash' as const, label: 'Trash', icon: Trash2 },
-  { to: '/search' as const, label: 'Search', icon: Search },
   { to: '/runbooks' as const, label: 'Runbooks', icon: BookOpen },
   { to: '/codes' as const, label: 'One-time codes', icon: ShieldCheck },
   { to: '/access' as const, label: 'Access control', icon: Shield },
@@ -45,6 +44,15 @@ export function AppShell() {
     staleTime: 60_000,
   });
 
+  const healthQ = useQuery({
+    queryKey: ['health', auth.address],
+    queryFn: () => bao.health(),
+    enabled: auth.status === 'authenticated',
+    retry: false,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+
   useEffect(() => {
     setNamespaceDraft(auth.namespace);
     setNamespaceError(null);
@@ -72,7 +80,6 @@ export function AppShell() {
     const jump: Array<() => void> = [
       () => void navigate({ to: '/welcome' }),
       () => void navigate({ to: '/secrets', search: { project: undefined, env: undefined, service: undefined, folder: undefined } }),
-      () => void navigate({ to: '/search', search: { q: undefined } }),
       () => void navigate({ to: '/runbooks', search: { project: undefined } }),
       () => void navigate({ to: '/codes' }),
       () => void navigate({ to: '/access', search: { view: undefined, project: undefined, env: undefined } }),
@@ -80,7 +87,7 @@ export function AppShell() {
       () => void navigate({ to: '/automation', search: { path: undefined } }),
     ];
     const handler = (event: KeyboardEvent) => {
-      if (event.altKey && !event.ctrlKey && !event.metaKey && /^[1-8]$/.test(event.key)) {
+      if (event.altKey && !event.ctrlKey && !event.metaKey && /^[1-7]$/.test(event.key)) {
         event.preventDefault();
         jump[Number(event.key) - 1]();
         return;
@@ -108,6 +115,21 @@ export function AppShell() {
   const policies = auth.identity?.policies ?? [];
   const ttlLabel = tokenTtlLabel(policies, auth.identity?.ttl, auth.identity?.expire_time);
   const renewable = Boolean(auth.identity?.renewable && remaining !== null);
+  // In dev the console talks to the same origin through a proxy, so the chip
+  // must show the OpenBao target rather than 127.0.0.1:5173.
+  const serverRaw = import.meta.env.DEV && typeof __BAO_TARGET__ === 'string' && __BAO_TARGET__
+    ? __BAO_TARGET__
+    : auth.address;
+  const serverHost = (() => {
+    try { return new URL(serverRaw).host; } catch { return serverRaw; }
+  })();
+  const health = healthQ.isError
+    ? 'unreachable'
+    : healthQ.data?.sealed
+      ? 'sealed'
+      : healthQ.data
+        ? 'healthy'
+        : 'checking';
 
   if (auth.status !== 'authenticated') {
     return (
@@ -122,13 +144,13 @@ export function AppShell() {
     <div className="app-shell">
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <aside className="sidebar" aria-label="Main navigation">
-        <div className="brand">
+        <Link to="/secrets" search={{ project: undefined, env: undefined, service: undefined, folder: undefined }} className="brand" aria-label="OpenBao console home">
           <div className="brand__mark" aria-hidden="true">B</div>
           <div>
             <span className="brand__name">OpenBao</span>
             <span className="brand__tag">community console</span>
           </div>
-        </div>
+        </Link>
 
         <nav className="nav-group" aria-label="Workspace">
           <div className="nav-group__label">Workspace</div>
@@ -141,8 +163,10 @@ export function AppShell() {
         </nav>
 
         <div className="sidebar__footer">
-          <div className="notice small">
-            <Server size={14} /> <span className="mono">{auth.address}</span>
+          <div className="server-chip" title={`${serverRaw} · ${health}`} aria-label={`OpenBao server ${serverHost} (${health})`} data-testid="server-chip">
+            <span className={`server-chip__dot server-chip__dot--${health}`} aria-hidden="true" />
+            <Server size={14} />
+            <span className="server-chip__host mono">{serverHost}</span>
           </div>
           <div className="identity-chip">
             <div className="identity-chip__avatar" aria-hidden="true">

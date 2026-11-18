@@ -75,7 +75,6 @@ export function AutomationPage() {
     <div className="grid" style={{ gap: '1.1rem' }}>
       <div className="page__header">
         <div>
-          <h2>For agents and automation</h2>
           <p>Everything a script or coding agent needs: exact API paths, copyable commands and visible permissions.</p>
         </div>
         <Badge variant="primary"><Bot size={13} /> machine-friendly</Badge>

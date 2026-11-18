@@ -25,7 +25,7 @@ import {
   Upload,
   UserRound,
 } from 'lucide-react';
-import { bao, type CapabilitiesMap } from '@/lib/api';
+import { bao, BaoError, type CapabilitiesMap } from '@/lib/api';
 import { can, deniedReason } from '@/lib/capabilities';
 import { envMetadataPath, envRank, secretApiPath, secretPath } from '@/lib/baoPaths';
 import { envFile, formatWhen, mask } from '@/lib/format';
@@ -236,7 +236,12 @@ function FolderRows({ folder, current, depth, onSelect }: {
       <Folder size={16} />
       <span className="list-item__main">
         <span className="list-item__title">{child.name}</span>
-        <span className="list-item__sub">{child.folders.length + child.secrets.length} items</span>
+        {child.folders.length > 0 && (
+          <span className="list-item__sub">{child.folders.length} subfolder{child.folders.length === 1 ? '' : 's'}</span>
+        )}
+      </span>
+      <span className="list-item__count">
+        {child.secrets.length} secret{child.secrets.length === 1 ? '' : 's'}
       </span>
     </button>,
     ...FolderRows({ folder: child, current, depth: depth + 1, onSelect }),
@@ -293,13 +298,21 @@ export function SecretsPage() {
     if (!project && projects.data?.length) setProject(search.project ?? projects.data[0]);
   }, [projects.data, project, search.project]);
 
+  // Reconcile the selected environment with the current project. Switching
+  // projects used to leave the previous project's env in state/URL, so a
+  // single-environment project rendered an empty, non-interactive dead end.
   useEffect(() => {
-    if (!env && envs.length) {
-      setEnv(search.env && envs.includes(search.env) ? search.env : envs[0]);
-      setFolder(search.folder ?? '');
-      setService(search.service);
+    if (!envs.length) return;
+    const current = env && envs.includes(env) ? env : undefined;
+    const fromUrl = search.env && envs.includes(search.env) ? search.env : undefined;
+    const next = current ?? fromUrl ?? envs[0];
+    if (next !== env) {
+      setEnv(next);
+      setVersion(undefined);
+      // Drop a selection that belonged to the previous environment.
+      if (env !== undefined) setService(undefined);
     }
-  }, [envs, env, search.env, search.folder, search.service]);
+  }, [envs, env, search.env]);
 
   useEffect(() => {
     if (!allPaths.length || service) return;
@@ -359,6 +372,9 @@ export function SecretsPage() {
   const newPath = probe ? `kv/data/${probe}` : '';
   const metaWritePath = currentPath ? currentPath.replace(/^kv\/data\//, 'kv/metadata/') : '';
   const writable = can(caps, currentPath, 'update') || can(caps, currentPath, 'create');
+  // A 404 means the path does not exist. It must never be shown as "no access":
+  // glob policies can report full capabilities for a path with no secret.
+  const secretNotFound = secretQ.error instanceof BaoError && secretQ.error.status === 404;
   const canCreate = can(caps, newPath, 'create') || can(caps, newPath, 'update');
   const canWriteMeta = can(caps, metaWritePath, 'update') ||
     Boolean(probe && can(caps, `kv/metadata/${probe}`, 'create'));
@@ -540,19 +556,23 @@ export function SecretsPage() {
     URL.revokeObjectURL(url);
   }
 
-  async function openCreate() {
+  function openCreateAt(path: string) {
     setEditorError(null);
     setDialog(null);
     setConfirmDiscard(false);
     const next: EditorState = {
       mode: 'create',
-      name: folder ? `${folder}/` : '',
+      name: path,
       rows: [{ id: 'new-0', key: '', value: '' }],
       annotations: { tags: [], note: '', comments: {}, overrides: {} },
       baseMetadata: {},
     };
     setEditor(next);
     setEditorBaseline(editorSnapshot(next));
+  }
+
+  async function openCreate() {
+    openCreateAt(folder ? `${folder}/` : '');
   }
 
   async function openEdit() {
@@ -576,6 +596,11 @@ export function SecretsPage() {
     } catch (error) {
       addToast('error', 'Could not load the secret', error instanceof Error ? error.message : undefined);
     }
+  }
+
+  async function openAddField() {
+    await openEdit();
+    addRow();
   }
 
   async function saveEditor() {
@@ -708,24 +733,44 @@ export function SecretsPage() {
   return (
     <div className="grid" style={{ gap: '1.1rem' }}>
       <OnboardingBanner />
-      <div className="page__header">
-        <h2>Secrets</h2>
-      </div>
 
       <div className="control-bar">
         <div className="field">
           <label htmlFor="project">Project</label>
-          <select id="project" value={project ?? ''} onChange={(event) => { setProject(event.target.value); setService(undefined); setVersion(undefined); }}>
+          <select
+            id="project"
+            value={project ?? ''}
+            onChange={(event) => {
+              // Reset env/folder too: keeping them across projects is the
+              // single-environment dead end (the new project has no such env).
+              setProject(event.target.value);
+              setEnv(undefined);
+              setFolder('');
+              setService(undefined);
+              setVersion(undefined);
+            }}
+          >
             {projects.isLoading && <option>Loading…</option>}
             {projects.data?.map((name) => <option key={name} value={name}>{name}</option>)}
           </select>
         </div>
         <div className="field" style={{ flex: 1 }}>
-          <label>Environment</label>
+          <label htmlFor="environment">Environment</label>
           {envs.length <= 1 ? (
-            <div className="env-label" aria-label="Environment">{envs[0] ?? '—'}</div>
+            // Always a real control, even with one environment. A plain <div>
+            // looked inert and left new users unable to tell it was selected.
+            <select
+              id="environment"
+              data-testid="environment-control"
+              value={env ?? ''}
+              disabled={envs.length === 0}
+              onChange={(event) => { if (event.target.value) { setEnv(event.target.value); setService(undefined); setVersion(undefined); } }}
+              title={envs.length === 0 ? 'No environment could be discovered for this project' : 'Browse this environment'}
+            >
+              {envs.length === 0 ? <option value="">No environment</option> : envs.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
           ) : (
-            <div className="env-tabs" role="group" aria-label="Environment">
+            <div className="env-tabs" role="group" aria-label="Environment" data-testid="environment-control">
               {envView.tabs.map((name) => {
                 const allowed = can(caps, project ? envMetadataPath(project, name) : '', 'list');
                 return (
@@ -777,33 +822,39 @@ export function SecretsPage() {
             <div className="panel__head">
               <FolderOpen size={17} />
               <h3>Folders</h3>
-              <Badge size="small">{filteredSecrets.length}</Badge>
+              <Badge size="small">{tree.folders.length}</Badge>
               <Button
                 size="small"
                 variant="outlined"
                 icon={<Plus size={14} />}
                 onClick={() => void openCreate()}
                 disabled={!canCreate}
-                title={canCreate ? 'Create a secret in this folder' : 'Your token cannot create secrets here'}
+                title={canCreate ? 'Create a new folder (KV path)' : 'Your token cannot create folders here'}
               >
-                New secret
+                New folder
               </Button>
             </div>
+            <nav className="folder-crumbs" aria-label="Folder location">
+              {crumbs.map((crumb, index) => (
+                <span key={crumb.path || 'root'} className="folder-crumbs__part">
+                  {index > 0 && <ChevronRight size={12} />}
+                  <button
+                    className="link-btn mono"
+                    onClick={() => { setFolder(crumb.path); setService(undefined); setVersion(undefined); }}
+                    aria-current={folder === crumb.path ? 'location' : undefined}
+                  >
+                    {index === 0 ? 'Root' : crumb.label}
+                  </button>
+                </span>
+              ))}
+            </nav>
             <div style={{ padding: 0 }}>
               {pathsQ.isLoading && <div className="state"><div className="spinner" /></div>}
               {pathsQ.isError && <ErrorState error={pathsQ.error} onRetry={() => void pathsQ.refetch()} />}
-              <button
-                className={`list-item folder-item ${folder === '' ? 'selected' : ''}`}
-                onClick={() => { setFolder(''); setService(undefined); setVersion(undefined); }}
-                data-testid="folder-root"
-              >
-                <FolderOpen size={16} />
-                <span className="list-item__main">
-                  <span className="list-item__title">Root</span>
-                  <span className="list-item__sub">{tree.secrets.length} secrets · {tree.folders.length} folders</span>
-                </span>
-              </button>
               <FolderRows folder={tree} current={folder} depth={0} onSelect={(path) => { setFolder(path); setService(undefined); setVersion(undefined); }} />
+              {!pathsQ.isLoading && tree.folders.length === 0 && (
+                <p className="small muted" style={{ padding: '0 var(--spacing-md)' }}>No folders in this project yet.</p>
+              )}
               <div className="divider" style={{ margin: '0.5rem var(--spacing-md)' }} />
               <div className="section-title" style={{ padding: '0 var(--spacing-md)' }}>
                 Secrets in {folder || 'root'} ({filteredSecrets.length})
@@ -811,20 +862,24 @@ export function SecretsPage() {
               {!pathsQ.isLoading && filteredSecrets.length === 0 && (
                 <p className="small muted" style={{ padding: '0 var(--spacing-md)' }}>No secrets in this folder.</p>
               )}
-              {filteredSecrets.map((path) => (
-                <button
-                  key={path}
-                  className={`list-item ${service === path ? 'selected' : ''}`}
-                  onClick={() => { setService(path); setVersion(undefined); }}
-                  data-testid={`secret-${path}`}
-                >
-                  <Database size={16} />
-                  <span className="list-item__main">
-                    <span className="list-item__title">{secretName(path)}</span>
-                    <span className="list-item__sub">{path}</span>
-                  </span>
-                </button>
-              ))}
+              {filteredSecrets.map((path) => {
+                const fields = fieldNamesByPath[path]?.length ?? 0;
+                return (
+                  <button
+                    key={path}
+                    className={`list-item ${service === path ? 'selected' : ''}`}
+                    onClick={() => { setService(path); setVersion(undefined); }}
+                    data-testid={`secret-${path}`}
+                  >
+                    <Database size={16} />
+                    <span className="list-item__main">
+                      <span className="list-item__title">{secretName(path)}</span>
+                      {path !== secretName(path) && <span className="list-item__sub">{path}</span>}
+                    </span>
+                    <span className="list-item__count">{fields} field{fields === 1 ? '' : 's'}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -838,47 +893,107 @@ export function SecretsPage() {
                 <h3>{service ? secretName(service) : 'Select a secret'}</h3>
                 {env && <EnvBadge env={env} />}
                 {version !== undefined && <Badge variant="info" size="small">v{version}</Badge>}
-                {!writable && currentPath && <Badge variant="outline" size="small"><Lock size={12} /> read-only</Badge>}
-                <Button
-                  size="small"
-                  variant={showCompare ? 'primary' : 'ghost'}
-                  icon={<Columns3 size={15} />}
-                  onClick={() => setShowCompare((value) => !value)}
-                  disabled={!service}
-                  title="Compare this field set across environments"
-                >
-                  Compare
-                </Button>
-                <Button size="small" icon={<Pencil size={15} />} onClick={() => void openEdit()} disabled={!writable || !service} data-testid="edit-secret">
-                  Edit
-                </Button>
-                <details className="action-menu">
-                  <summary className="btn btn--small btn--outlined" aria-label="More secret actions" title="More actions">
-                    <MoreHorizontal size={16} />
-                  </summary>
-                  <div className="action-menu__items">
-                    <button onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); setConfirmCopyEnv(true); }} disabled={!secretQ.data}>
-                      <FileJson size={14} /> Copy .env
-                    </button>
-                    <button
-                      data-testid="open-import"
-                      onClick={(event) => {
-                        event.currentTarget.closest('details')?.removeAttribute('open');
-                        openStandaloneImport();
-                      }}
+                {!writable && currentPath && !secretNotFound && <Badge variant="outline" size="small"><Lock size={12} /> read-only</Badge>}
+                {secretNotFound && service ? (
+                  <>
+                    <Button
+                      size="small"
+                      variant="primary"
+                      icon={<Plus size={15} />}
+                      onClick={() => openCreateAt(service)}
                       disabled={!canCreate}
-                      title={canCreate ? 'Create a new secret from pasted or imported fields' : 'Your token cannot create secrets here'}
+                      title={canCreate ? `Create ${service} in ${env}` : 'Your token cannot create secrets here'}
+                      data-testid="create-missing-secret"
                     >
-                      <Upload size={14} /> Import new secret…
-                    </button>
-                    <button onClick={() => void (async () => { await openEdit(); setDialog('export'); })} disabled={!service}>
-                      <Download size={14} /> Export values…
-                    </button>
-                    <button onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); openPromote(envs.find((name) => name !== env) ?? ''); }} disabled={!writable || !service || envs.length < 2}>
-                      <ArrowRightLeft size={14} /> Promote to…
-                    </button>
-                  </div>
-                </details>
+                      Create this secret
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="ghost"
+                      icon={<Upload size={15} />}
+                      onClick={openStandaloneImport}
+                      disabled={!canCreate}
+                      title={canCreate ? 'Create a new secret from pasted fields' : 'Your token cannot create secrets here'}
+                    >
+                      Import
+                    </Button>
+                  </>
+                ) : service ? (
+                  <>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      icon={<Plus size={15} />}
+                      onClick={() => void openAddField()}
+                      disabled={!canWriteMeta}
+                      title={canWriteMeta ? 'Add a key to this secret' : 'Your token cannot add keys here'}
+                    >
+                      Add secret
+                    </Button>
+                    <Button
+                      size="small"
+                      variant={showCompare ? 'primary' : 'ghost'}
+                      icon={<Columns3 size={15} />}
+                      onClick={() => setShowCompare((value) => !value)}
+                      title="Compare this field set across environments"
+                    >
+                      Compare
+                    </Button>
+                    <Button size="small" icon={<Pencil size={15} />} onClick={() => void openEdit()} disabled={!writable} data-testid="edit-secret">
+                      Edit
+                    </Button>
+                    <details className="action-menu">
+                      <summary className="btn btn--small btn--outlined" aria-label="More secret actions" title="More actions">
+                        <MoreHorizontal size={16} />
+                      </summary>
+                      <div className="action-menu__items">
+                        <button onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); setConfirmCopyEnv(true); }} disabled={!secretQ.data}>
+                          <FileJson size={14} /> Copy .env
+                        </button>
+                        <button
+                          data-testid="open-import"
+                          onClick={(event) => {
+                            event.currentTarget.closest('details')?.removeAttribute('open');
+                            openStandaloneImport();
+                          }}
+                          disabled={!canCreate}
+                          title={canCreate ? 'Create a new secret from pasted or imported fields' : 'Your token cannot create secrets here'}
+                        >
+                          <Upload size={14} /> Import new secret…
+                        </button>
+                        <button onClick={() => void (async () => { await openEdit(); setDialog('export'); })} disabled={!service}>
+                          <Download size={14} /> Export values…
+                        </button>
+                        <button onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); openPromote(envs.find((name) => name !== env) ?? ''); }} disabled={!writable || envs.length < 2}>
+                          <ArrowRightLeft size={14} /> Promote to…
+                        </button>
+                      </div>
+                    </details>
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      icon={<Plus size={15} />}
+                      onClick={() => void openCreate()}
+                      disabled={!canCreate}
+                      title={canCreate ? 'Create a new folder (KV path)' : 'Your token cannot create folders here'}
+                    >
+                      New folder
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="ghost"
+                      icon={<Upload size={15} />}
+                      onClick={openStandaloneImport}
+                      disabled={!canCreate}
+                      title={canCreate ? 'Create a new folder from pasted fields' : 'Your token cannot create secrets here'}
+                    >
+                      Import
+                    </Button>
+                  </>
+                )}
               </div>
               <div className="panel__body secret-detail__body">
                 {service && (
@@ -895,10 +1010,15 @@ export function SecretsPage() {
                     {service && <><ChevronRight size={13} /><span className="mono strong">{secretName(service)}</span></>}
                   </nav>
                 )}
-                {!service && <p className="muted">Select a secret from the list to see its fields.</p>}
-                {service && !writable && caps && <div className="notice warning small">{deniedReason(caps, currentPath, 'update')}</div>}
+                {!service && <p className="muted">Select a folder or secret from the left to see its fields.</p>}
+                {service && secretQ.data && !writable && caps && <div className="notice warning small">{deniedReason(caps, currentPath, 'update')}</div>}
                 {secretQ.isLoading && <div className="state"><div className="spinner" /></div>}
-                {secretQ.isError && <ErrorState error={secretQ.error} onRetry={() => void secretQ.refetch()} />}
+                {secretNotFound && (
+                  <EmptyState icon={<KeyRound size={26} />} title="Secret not found">
+                    This path does not exist in {env ?? 'this environment'}. It may have been deleted, or the link may be out of date.
+                  </EmptyState>
+                )}
+                {secretQ.isError && !secretNotFound && <ErrorState error={secretQ.error} onRetry={() => void secretQ.refetch()} />}
                 {secretQ.data && (
                   <>
                     {(annotations.tags.length > 0 || annotations.note) && (

@@ -149,7 +149,6 @@ export function WelcomePage() {
     <div className="grid" style={{ gap: '1rem' }} data-testid="welcome-page" data-stage={stage}>
       <div className="page__header">
         <div>
-          <h2>Getting started</h2>
           <p>A short checklist that follows the real state of your OpenBao server.</p>
         </div>
         {setupComplete ? (

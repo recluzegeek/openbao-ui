@@ -96,6 +96,10 @@
 
 .btn--primary:hover:not(:disabled) {
   background-color: var(--color-primary-hover);
+}
+
+/* Only sign-in keeps the lift; ordinary actions use a quiet tint. */
+.btn--primary[data-testid='login-submit']:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: var(--shadow-xl);
 }
@@ -110,8 +114,6 @@
 .btn--secondary:hover:not(:disabled) {
   background-color: var(--color-border-hover);
   border-color: var(--color-border-hover);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-lg);
 }
 
 .btn--ghost {
@@ -133,8 +135,7 @@
 }
 
 .btn--ghost.btn--active:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-md);
 }
 
 /* Outlined variants - Base styles with CSS variables for theming */
@@ -176,20 +177,26 @@
   border-radius: var(--btn-border-radius);
 }
 
-.btn--outlined:hover:not(:disabled),
+.btn--outlined:hover:not(:disabled) {
+  background: var(--color-primary-light);
+  color: var(--color-selected-fg);
+  border-color: var(--color-primary);
+  transition: var(--transition-base);
+}
+
+/* Destructive confirm is the one ordinary control that may still lift. */
 .btn--outlined-danger:hover:not(:disabled) {
-  background: var(--btn-outlined-bg-hover);
-  color: var(--color-text-light);
-  border-color: var(--btn-outlined-border-hover);
+  background: var(--color-red-100, #fee4e2);
+  color: var(--color-red);
+  border-color: var(--color-red);
   transform: translateY(-2px);
   box-shadow: var(--shadow-lg);
-  transition: var(--transition-very-slow);
+  transition: var(--transition-base);
 }
 
 .btn--outlined:hover:not(:disabled)::after,
 .btn--outlined-danger:hover:not(:disabled)::after {
-  animation: 1s glitch-effect;
-  animation-timing-function: steps(2, end);
+  animation: none;
 }
 
 /* Color variants - Only override the color variables */

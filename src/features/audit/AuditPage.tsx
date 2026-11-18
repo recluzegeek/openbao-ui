@@ -67,7 +67,6 @@ export function AuditPage() {
     <div className="grid" style={{ gap: '1rem' }}>
       <div className="page__header">
         <div>
-          <h2>Audit log</h2>
           <p>Who changed what, where and when — metadata only, never secret values.</p>
         </div>
         <div className="topbar__actions">
@@ -84,7 +83,8 @@ export function AuditPage() {
         </div>
       </div>
 
-      <div className="control-bar audit-filters" role="search" aria-label="Audit log filters">
+      {audit.data?.available !== false && (
+        <div className="control-bar audit-filters" role="search" aria-label="Audit log filters">
         <div className="search search--large">
           <Search size={16} />
           <input
@@ -128,7 +128,8 @@ export function AuditPage() {
         {(filters.search || filters.actor !== 'all' || filters.operation !== 'all' || filters.range !== 'all') && (
           <Button size="small" variant="ghost" onClick={() => void navigate({ search: EMPTY_SEARCH, replace: true })}>Clear</Button>
         )}
-      </div>
+        </div>
+      )}
 
       {audit.isError && <ErrorState error={audit.error} onRetry={() => void audit.refetch()} />}
       {!audit.isError && audit.isLoading && <div className="state"><div className="spinner" /></div>}

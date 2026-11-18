@@ -46,6 +46,11 @@ export function mergeEffectivePolicies(tokenPolicies: string[], effective?: stri
   return { policies: [...new Set([...tokenPolicies, ...effective])], effective: true };
 }
 
+/** `lookup-self` splits direct token policies from identity-group policies. */
+export function mergeLookupPolicies(policies?: string[], identityPolicies?: string[]): string[] {
+  return [...new Set([...(policies ?? []), ...(identityPolicies ?? [])])];
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const initial = getBaoConfig();
@@ -61,15 +66,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   ): Promise<{ ok: boolean; error?: unknown }> => {
     try {
       const result = await bao.lookupSelf();
-      let policies = result.data.policies ?? [];
-      let fromAcl = false;
+      // `lookup-self` splits token policies from identity-group policies. Merge
+      // both so an org-admin token no longer reports only "default".
+      const identityPolicies = result.data.identity_policies ?? [];
+      let policies = mergeLookupPolicies(result.data.policies, identityPolicies);
+      let fromAcl = identityPolicies.length > 0;
       try {
         // Group policies are only visible through this endpoint. A 403 here
         // must not invalidate an otherwise healthy token.
         const acl = await bao.resultantAcl();
         const merged = mergeEffectivePolicies(policies, acl.data.policies);
         policies = merged.policies;
-        fromAcl = merged.effective;
+        fromAcl = fromAcl || merged.effective;
       } catch {
         // Fall back to the token's directly attached policies.
       }

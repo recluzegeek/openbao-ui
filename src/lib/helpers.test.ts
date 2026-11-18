@@ -5,7 +5,7 @@ import { envFile, formatTtl, parsePeriod, secondsUntil, shellQuote, tokenTtlLabe
 import { baoCliSnippet, curlSnippet, envPullSnippet } from './snippets';
 import { countFieldChanges, dataFromRows, fieldNameError, rowsFromData, validSecretName, validateRows } from './secretForm';
 import { bao, normalizeNamespace, request, setBaoConfig } from './api';
-import { mergeEffectivePolicies } from './auth';
+import { mergeEffectivePolicies, mergeLookupPolicies } from './auth';
 import { sessionSecondsLeft } from './session';
 import { shareLinkFor, validWrapTtl, wrappingTokenFromHash } from './wrapping';
 import { appRoleCapabilityPaths, capabilityPathsForFolder, capabilityPathsForSecret, environmentCreationTarget, kvBrowserCapabilityPaths, runbookCapabilityPaths } from './queries';
@@ -593,6 +593,13 @@ describe('session hardening', () => {
       policies: ['default', 'org-admin'], effective: true,
     });
     expect(mergeEffectivePolicies(['default'], undefined)).toEqual({ policies: ['default'], effective: false });
+  });
+
+  it('merges identity-group policies from lookup-self', () => {
+    expect(mergeLookupPolicies(['default'], ['org-admin'])).toEqual(['default', 'org-admin']);
+    expect(mergeLookupPolicies(['default', 'org-admin'], ['org-admin'])).toEqual(['default', 'org-admin']);
+    expect(mergeLookupPolicies(undefined, undefined)).toEqual([]);
+    expect(mergeLookupPolicies(['default'], undefined)).toEqual(['default']);
   });
 
   it('treats an empty LIST 404 as no keys', async () => {

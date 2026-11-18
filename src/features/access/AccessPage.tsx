@@ -113,7 +113,6 @@ export function AccessPage() {
     <div className="grid" style={{ gap: '1rem' }}>
       <div className="page__header">
         <div>
-          <h2>Access control</h2>
           <p>Design project-scoped roles, preview the HCL, and check what a user or machine can actually reach.</p>
         </div>
         <div className="topbar__actions">

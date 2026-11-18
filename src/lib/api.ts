@@ -182,6 +182,8 @@ export interface LookupSelfResponse {
     name?: string;
     display_name?: string;
     policies?: string[];
+    /** Policies inherited from the token's identity groups (not in `policies`). */
+    identity_policies?: string[];
     ttl?: number;
     renewable?: boolean;
     expire_time?: string;

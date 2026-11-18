@@ -55,7 +55,13 @@ export function SearchPage() {
   });
 
   const [favorites, setFavorites] = useState<SecretRef[]>(() => loadFavorites());
-  const recent = useMemo(() => loadRecent(), [input]);
+  // Recents can outlive a project (test projects get removed). Drop entries
+  // whose project no longer exists instead of offering a dead link.
+  const projectNames = useMemo(() => new Set(projects.data ?? []), [projects.data]);
+  const recent = useMemo(
+    () => loadRecent().filter((ref) => !projects.data || projectNames.has(ref.project)),
+    [input, projects.data, projectNames],
+  );
   const allHits = useMemo<Hit[]>(() => targets.flatMap((target, index) => {
     const fields = Object.keys(secretQueries[index]?.data?.data.data ?? {});
     const self: Hit = { ...target, title: target.path, detail: `${fields.length} fields` };
@@ -115,7 +121,6 @@ export function SearchPage() {
     <div className="grid" style={{ gap: '1rem' }}>
       <div className="page__header">
         <div>
-          <h2>Global search</h2>
           <p>Find a secret or field by name across every project and environment you can read.</p>
         </div>
       </div>

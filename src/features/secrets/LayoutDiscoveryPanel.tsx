@@ -37,6 +37,7 @@ export function LayoutDiscoveryPanel({ project, discovery, error }: {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
   const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [showIssues, setShowIssues] = useState(false);
   const [name, setName] = useState('');
   const [rows, setRows] = useState<MetadataRow[]>([
@@ -97,16 +98,36 @@ export function LayoutDiscoveryPanel({ project, discovery, error }: {
     );
   }
   if (!discovery) {
-    return <div className="notice small">{project ? 'Discovering the KV layout from the server…' : 'Choose a project to discover its KV layout.'}</div>;
+    return (
+      <div className="panel layout-panel" data-testid="layout-discovery-skeleton" aria-busy="true">
+        <div className="panel__head">
+          <Layers size={17} />
+          <h3>Server layout</h3>
+          <span className="skeleton" style={{ width: 110, height: 18, marginLeft: 'auto' }} />
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="panel" data-testid="layout-discovery">
+    <div className="panel layout-panel" data-testid="layout-discovery">
       <div className="panel__head">
         <Layers size={17} />
         <h3>Server layout</h3>
         <Badge size="small" variant="outline">{discovery.profile.kind}</Badge>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem' }}>
+        {warningGroups.length > 0 && (
+          <button
+            type="button"
+            className="layout-issues-chip"
+            data-testid="layout-issues-chip"
+            aria-expanded={expanded && showIssues}
+            onClick={() => { setExpanded(true); setShowIssues(true); }}
+          >
+            <AlertTriangle size={14} />
+            {discovery.warnings.length} layout issue{discovery.warnings.length === 1 ? '' : 's'}
+          </button>
+        )}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <Button
             size="small"
             variant="outlined"
@@ -118,42 +139,53 @@ export function LayoutDiscoveryPanel({ project, discovery, error }: {
           >
             New environment
           </Button>
+          <button
+            type="button"
+            className="icon-btn"
+            data-testid="layout-toggle"
+            aria-expanded={expanded}
+            title={expanded ? 'Hide layout details' : 'Show layout details'}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            <ChevronDown size={16} className={expanded ? 'rotate' : ''} />
+          </button>
         </div>
       </div>
-      <div className="panel__body" style={{ display: 'grid', gap: '0.5rem' }}>
-        <p className="small muted">{discovery.profile.description}. Discovered {discovery.rawPaths.length} paths on the server.</p>
-        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-          <Badge size="small" variant="info">{counts.metadata} labelled by server</Badge>
-          <Badge size="small" variant="info">{counts.heuristic} recognised from paths</Badge>
-          <Badge size="small" variant="outline">{counts.raw} other</Badge>
-        </div>
-        {warningGroups.length > 0 && (
-          <div className="notice warning small" data-testid="layout-warnings">
-            <button
-              type="button"
-              className="layout-issues-chip"
-              data-testid="layout-issues-chip"
-              aria-expanded={showIssues}
-              onClick={() => setShowIssues((value) => !value)}
-            >
-              <AlertTriangle size={14} />
-              {discovery.warnings.length} layout issue{discovery.warnings.length === 1 ? '' : 's'}
-              <ChevronDown size={13} className={showIssues ? 'rotate' : ''} />
-            </button>
-            {showIssues && (
-              <div data-testid="layout-issues-detail" style={{ marginTop: '0.4rem' }}>
-                {warningGroups.map((group) => (
-                  <p key={group.label} style={{ margin: '0.25rem 0' }}>
-                    <strong>{group.label}</strong> ({group.count})
-                    <span className="muted mono"> — {group.examples.join('; ')}</span>
-                  </p>
-                ))}
-                <span className="muted">Full diagnostics stay in the browser console.</span>
-              </div>
-            )}
+      {expanded && (
+        <div className="panel__body" style={{ display: 'grid', gap: '0.5rem' }}>
+          <p className="small muted">{discovery.profile.description}. Discovered {discovery.rawPaths.length} paths on the server.</p>
+          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+            <Badge size="small" variant="info">{counts.metadata} labelled by server</Badge>
+            <Badge size="small" variant="info">{counts.heuristic} recognised from paths</Badge>
+            <Badge size="small" variant="outline">{counts.raw} other</Badge>
           </div>
-        )}
-      </div>
+          {warningGroups.length > 0 && (
+            <div className="notice warning small" data-testid="layout-warnings">
+              <button
+                type="button"
+                className="layout-issues-chip"
+                aria-expanded={showIssues}
+                onClick={() => setShowIssues((value) => !value)}
+              >
+                <AlertTriangle size={14} />
+                {discovery.warnings.length} layout issue{discovery.warnings.length === 1 ? '' : 's'}
+                <ChevronDown size={13} className={showIssues ? 'rotate' : ''} />
+              </button>
+              {showIssues && (
+                <div data-testid="layout-issues-detail" style={{ marginTop: '0.4rem' }}>
+                  {warningGroups.map((group) => (
+                    <p key={group.label} style={{ margin: '0.25rem 0' }}>
+                      <strong>{group.label}</strong> ({group.count})
+                      <span className="muted mono"> — {group.examples.join('; ')}</span>
+                    </p>
+                  ))}
+                  <span className="muted">Full diagnostics stay in the browser console.</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {open && (
         <Dialog

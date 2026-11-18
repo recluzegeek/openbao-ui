@@ -126,6 +126,10 @@ function devAuditLog(): Plugin {
 
 export default defineConfig({
   plugins: [react(), devAuditLog()],
+  define: {
+    // Exposed only as a host label for the sidebar chip; requests still go through the proxy.
+    __BAO_TARGET__: JSON.stringify(process.env.VITE_BAO_TARGET ?? ''),
+  },
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
