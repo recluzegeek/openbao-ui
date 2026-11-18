@@ -98,6 +98,7 @@ and wired into `capabilityPathsForSecret()` / `capabilityPathsForFolder()`.
 - `welcome-page` — getting-started guide (`data-stage` = derived server stage); `welcome-step-<id>` — checklist steps
 - `onboarding-banner` / `onboarding-open` / `onboarding-dismiss` — first-run hint on `/secrets`
 - `shortcuts-open` / `shortcuts-dialog` / `shortcut-list` — keyboard-shortcut help
+- `session-countdown` / `renew-token` — live token-lease countdown and renew control in the sidebar
 - copy buttons use `data-testid="copy-<label>"`
 
 The dev server also exposes `GET /api/audit?path=<api path>&limit=<n>` (localhost only, dev build
@@ -122,6 +123,12 @@ The first-run banner is remembered in `localStorage` under `console.onboarding`;
 restores it. Global shortcuts are `⌘K/Ctrl+K` (palette), `Alt+1`–`Alt+8` (sidebar sections), `/`
 (search), `?` (shortcut help) and `Esc`; they pause while typing in a field. A skip link and a
 `prefers-reduced-motion` rule are in the app shell and global CSS.
+
+**Session lease:** `lookup-self` returns `renewable` and `expire_time`; the sidebar shows a per-second
+countdown (`sessionSecondsLeft()` / `useSessionCountdown()` in `src/lib/session.ts`, going urgent below
+five minutes). For renewable, expiring tokens a renew button POSTs `auth/token/renew-self` with no
+secret in the body, merges the new `ttl`/`expire_time` into the identity and re-checks it without
+logging the token value. Non-expiring (root / periodic) tokens show no countdown.
 
 ## Rules for agents editing this repo
 

@@ -1,12 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { Activity, BookOpen, Compass, KeyRound, Keyboard, LogOut, Moon, Search, Server, Shield, ShieldCheck, Sun, TerminalSquare, Trash2 } from 'lucide-react';
+import { Activity, BookOpen, Compass, KeyRound, Keyboard, LogOut, Moon, RefreshCw, Search, Server, Shield, ShieldCheck, Sun, TerminalSquare, Trash2 } from 'lucide-react';
 import { bao, normalizeNamespace } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useSetupStage } from '@/lib/queries';
 import { useTheme } from '@/lib/useTheme';
-import { tokenTtlLabel } from '@/lib/format';
+import { formatTtl, tokenTtlLabel } from '@/lib/format';
+import { useSessionCountdown } from '@/lib/session';
 import { CommandPalette } from './CommandPalette';
 import { ShortcutsDialog } from './ShortcutsDialog';
 
@@ -101,6 +102,13 @@ export function AppShell() {
     return () => window.removeEventListener('keydown', handler);
   }, [navigate]);
 
+  const remaining = useSessionCountdown(auth.identity?.expire_time, auth.identity?.ttl);
+  const [renewing, setRenewing] = useState(false);
+  const displayName = auth.identity?.display_name || auth.identity?.name || 'Signed in';
+  const policies = auth.identity?.policies ?? [];
+  const ttlLabel = tokenTtlLabel(policies, auth.identity?.ttl, auth.identity?.expire_time);
+  const renewable = Boolean(auth.identity?.renewable && remaining !== null);
+
   if (auth.status !== 'authenticated') {
     return (
       <div className="state" style={{ minHeight: '100vh' }}>
@@ -109,10 +117,6 @@ export function AppShell() {
       </div>
     );
   }
-
-  const displayName = auth.identity?.display_name || auth.identity?.name || 'Signed in';
-  const policies = auth.identity?.policies ?? [];
-  const ttlLabel = tokenTtlLabel(policies, auth.identity?.ttl, auth.identity?.expire_time);
 
   return (
     <div className="app-shell">
@@ -148,8 +152,24 @@ export function AppShell() {
               <div className="identity-chip__name" title={displayName}>{displayName}</div>
               <div className="identity-chip__sub" title={auth.effectivePolicies ? 'Includes group policies from resultant-acl' : 'Direct token policies; group policies are unavailable for this token'}>
                 {policies.length ? `${policies.length} polic${policies.length === 1 ? 'y' : 'ies'}${auth.effectivePolicies ? ' · effective' : ''} · ${ttlLabel}` : 'token session'}
+                {remaining !== null && <span className={`session-countdown ${remaining < 300 ? 'session-countdown--urgent' : ''}`} data-testid="session-countdown"> · {formatTtl(remaining)} left</span>}
               </div>
             </div>
+            {renewable && (
+              <button
+                className="icon-btn"
+                title="Renew session token"
+                aria-label="Renew session token"
+                data-testid="renew-token"
+                disabled={renewing}
+                onClick={async () => {
+                  setRenewing(true);
+                  try { await auth.renew(); } finally { setRenewing(false); }
+                }}
+              >
+                <RefreshCw size={16} className={renewing ? 'spin' : ''} />
+              </button>
+            )}
             <button className="icon-btn" title="Sign out" aria-label="Sign out" onClick={() => void auth.logout()}>
               <LogOut size={16} />
             </button>

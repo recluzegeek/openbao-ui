@@ -6,6 +6,7 @@ import { baoCliSnippet, curlSnippet } from './snippets';
 import { dataFromRows, fieldNameError, rowsFromData, validSecretName, validateRows } from './secretForm';
 import { bao, normalizeNamespace, request, setBaoConfig } from './api';
 import { mergeEffectivePolicies } from './auth';
+import { sessionSecondsLeft } from './session';
 import { capabilityPathsForFolder, capabilityPathsForSecret, environmentCreationTarget, runbookCapabilityPaths } from './queries';
 import { environmentMarkerPath, inferLayout, physicalPath, type ClassifiedSecret, type LayoutProfile } from './layout';
 import { clearProjectLayouts, registerProjectLayout, resolveApiPath, resolveEnvMetadataPath, toLogicalPath } from './layoutResolver';
@@ -425,6 +426,20 @@ describe('secret-safe formatting', () => {
     expect(tokenTtlLabel(['default'], 0, undefined)).toBe('no expiry');
     expect(tokenTtlLabel(['default'], 900, '2026-11-17T12:00:00Z')).toBe('15m');
   });
+
+  it('derives the live session countdown from expiry, TTL and "now"', () => {
+    const now = 1_000_000;
+    // expire_time is authoritative when present.
+    expect(sessionSecondsLeft(new Date(now + 90_000).toISOString(), 3600, now)).toBe(90);
+    // An already-expired token clamps to zero rather than going negative.
+    expect(sessionSecondsLeft(new Date(now - 5_000).toISOString(), 3600, now)).toBe(0);
+    // Without expire_time, fall back to the reported TTL and never go negative.
+    expect(sessionSecondsLeft(undefined, 600, now)).toBe(600);
+    expect(sessionSecondsLeft(undefined, -3, now)).toBe(0);
+    // A token with no expiry and no TTL (root / periodic) has no countdown.
+    expect(sessionSecondsLeft(undefined, undefined, now)).toBeNull();
+    expect(sessionSecondsLeft(undefined, 0, now)).toBeNull();
+  });
 });
 
 describe('getting-started setup', () => {
@@ -586,6 +601,32 @@ describe('session hardening', () => {
     } as unknown as Response);
     expect(await request('kv/metadata/empty/', { list: true })).toEqual({ data: null });
     expect(fetchStub).toHaveBeenCalled();
+  });
+
+  it('renews the current token lease without logging the token value', async () => {
+    setBaoConfig({ token: 'test-token' });
+    const fetchStub = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        text: async () => JSON.stringify({ data: { ttl: 3600, renewable: true, expire_time: '2026-11-19T00:00:00Z' } }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        text: async () => '{"data":{"ttl":3600,"renewable":true,"expire_time":"2026-11-19T00:00:00Z"}}',
+      } as unknown as Response);
+
+    const result = await bao.renewSelf('1h');
+    const [url, init] = fetchStub.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(String(url)).toContain('/v1/auth/token/renew-self');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body))).toEqual({ increment: '1h' });
+    expect(result.data.ttl).toBe(3600);
+    expect(result.data.renewable).toBe(true);
+
+    // Omitting the increment uses the mount's default lease.
+    await bao.renewSelf();
+    const [, defaultInit] = fetchStub.mock.calls[1] as unknown as [URL, RequestInit];
+    expect(JSON.parse(String(defaultInit.body))).toEqual({});
   });
 
   it('patches a secret with HTTP PATCH on the data endpoint', async () => {

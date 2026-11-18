@@ -179,6 +179,7 @@ export interface LookupSelfResponse {
     display_name?: string;
     policies?: string[];
     ttl?: number;
+    renewable?: boolean;
     expire_time?: string;
     entity_id?: string;
     namespace?: { path?: string };
@@ -287,6 +288,12 @@ export const bao = {
       method: 'POST',
       data: { password },
       unauthenticated: true,
+    }),
+  /** Extend the current token's lease. Never logs or stores the token value. */
+  renewSelf: (increment?: string | number) =>
+    request<LookupSelfResponse>('auth/token/renew-self', {
+      method: 'POST',
+      data: increment === undefined ? {} : { increment },
     }),
   logout: () => request<void>('auth/token/revoke-self', { method: 'POST' }),
 

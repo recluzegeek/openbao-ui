@@ -24,6 +24,8 @@ interface AuthContextValue {
   loginWithUserpass: (username: string, password: string, address?: string, namespace?: string) => Promise<void>;
   setAddress: (address: string) => void;
   setNamespace: (namespace: string) => void;
+  /** Extend the current token lease and refresh its expiry. */
+  renew: (increment?: string | number) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -141,6 +143,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [refreshIdentity, setAddress, setNamespace],
   );
 
+  const renew = useCallback(async (increment?: string | number) => {
+    const result = await bao.renewSelf(increment);
+    // The renewal response carries the new ttl/expire_time. Merge it into the
+    // identity so the countdown updates immediately, then verify the full
+    // identity in the background without ever logging the token value.
+    setIdentity((current) => current ? { ...current, ...result.data } : current);
+    await refreshIdentity({ preserveOnError: true });
+  }, [refreshIdentity]);
+
   const logout = useCallback(async () => {
     try {
       await bao.logout();
@@ -166,9 +177,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loginWithUserpass,
       setAddress,
       setNamespace,
+      renew,
       logout,
     }),
-    [status, identity, effectivePolicies, address, namespace, error, loginWithToken, loginWithUserpass, setAddress, setNamespace, logout],
+    [status, identity, effectivePolicies, address, namespace, error, loginWithToken, loginWithUserpass, setAddress, setNamespace, renew, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
