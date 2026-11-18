@@ -97,6 +97,8 @@ interface RequestOptions {
   token?: string;
   /** Override the request Content-Type (KV PATCH needs application/merge-patch+json). */
   contentType?: string;
+  /** Extra headers, e.g. `X-Vault-Wrap-TTL` for response wrapping. Merged last. */
+  headers?: Record<string, string>;
 }
 
 export async function request<T>(apiPath: string, options: RequestOptions = {}): Promise<T> {
@@ -114,6 +116,7 @@ export async function request<T>(apiPath: string, options: RequestOptions = {}):
   if (token) headers['X-Vault-Token'] = token;
   if (config.namespace) headers['X-Vault-Namespace'] = config.namespace;
   if (options.data !== undefined) headers['Content-Type'] = options.contentType ?? 'application/json';
+  Object.assign(headers, options.headers ?? {});
 
   let response: Response;
   try {
@@ -241,6 +244,32 @@ export interface AuthMethodSummary {
   accessor?: string;
 }
 
+/** Response wrapping (`bao -wrap-ttl`): a short-lived, single-use token. */
+export interface WrapInfo {
+  token: string;
+  accessor?: string;
+  ttl: number;
+  creation_time?: string;
+  creation_path?: string;
+}
+
+export interface WrapResponse {
+  wrap_info: WrapInfo;
+}
+
+export interface UnwrapResponse {
+  data: Record<string, unknown>;
+  warnings?: string[] | null;
+}
+
+/** KV mount metadata from `sys/mounts` / `sys/internal/ui/mounts`. */
+export interface MountSummary {
+  path: string;
+  type: string;
+  version: 1 | 2;
+  description?: string;
+}
+
 export interface EntitySummary {
   name: string;
   id?: string;
@@ -296,6 +325,24 @@ export const bao = {
       data: increment === undefined ? {} : { increment },
     }),
   logout: () => request<void>('auth/token/revoke-self', { method: 'POST' }),
+
+  /**
+   * Wrap a response into a single-use token (CLI `bao -wrap-ttl`). The token is
+   * short-lived and can be unwrapped exactly once. Never log or persist it.
+   */
+  wrapResponse: (data: unknown, ttl: string) =>
+    request<WrapResponse>('sys/wrapping/wrap', {
+      method: 'POST',
+      data,
+      headers: { 'X-Vault-Wrap-TTL': ttl },
+    }),
+  /** Consume a wrapping token once. The wrapping token authenticates this call. */
+  unwrapResponse: (wrappingToken: string) =>
+    request<UnwrapResponse>('sys/wrapping/unwrap', {
+      method: 'POST',
+      token: wrappingToken,
+      data: {},
+    }),
 
   list: (path: string) => request<ListResponse>(path, { list: true }),
 

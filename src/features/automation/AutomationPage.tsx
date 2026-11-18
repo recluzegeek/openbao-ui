@@ -1,14 +1,23 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
-import { Bot, Clock, KeyRound, TerminalSquare } from 'lucide-react';
+import { Bot, Clock, KeyRound, Link2, TerminalSquare } from 'lucide-react';
+import { bao } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useCapabilities } from '@/lib/queries';
 import { can } from '@/lib/capabilities';
 import { tokenTtlLabel } from '@/lib/format';
+import { useToast } from '@/lib/toast';
 import { baoCliSnippet, curlSnippet, envPullSnippet, githubActionsSnippet } from '@/lib/snippets';
+import {
+  DEFAULT_WRAP_TTL,
+  WRAP_TTL_PRESETS,
+  shareLinkFor,
+  validWrapTtl,
+  type SharedSecretPayload,
+} from '@/lib/wrapping';
 import { Badge } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
-import { CodeSnippet, EmptyState } from '@/components/common/Extras';
+import { CodeSnippet, CopyButton, Dialog, EmptyState } from '@/components/common/Extras';
 
 const CAPABILITIES = ['create', 'read', 'update', 'patch', 'delete', 'list', 'sudo'];
 
@@ -16,16 +25,49 @@ export function AutomationPage() {
   const navigate = useNavigate({ from: '/automation' });
   const search = useRouterState({ select: (state) => state.location.search }) as Record<string, string | undefined>;
   const auth = useAuth();
+  const { addToast } = useToast();
   const [path, setPath] = useState(search.path ?? 'roomsss/env/development/app');
   const [inspected, setInspected] = useState(path);
-  const capsQ = useCapabilities([inspected.replace(/^kv\/data\//, '')]);
-  const caps = capsQ.data;
   const apiPath = inspected.replace(/^kv\/data\//, '');
+  // Wrapping needs `update` on sys/wrapping/wrap plus read on the source path.
+  const capsQ = useCapabilities([apiPath, 'sys/wrapping/wrap']);
+  const caps = capsQ.data;
+  const canWrap = can(caps, 'sys/wrapping/wrap', 'update') && can(caps, apiPath, 'read');
+
+  const [wrapTtl, setWrapTtl] = useState<string>(DEFAULT_WRAP_TTL);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareLink, setShareLink] = useState<string | null>(null);
+  const [shareError, setShareError] = useState<string | null>(null);
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setInspected(path);
+    setShareLink(null);
     void navigate({ to: '/automation', search: { path }, replace: true });
+  }
+
+  async function handleShare() {
+    if (!canWrap || !validWrapTtl(wrapTtl)) return;
+    setShareBusy(true);
+    setShareError(null);
+    setShareLink(null);
+    try {
+      // The secret value is read into memory only to be wrapped; it is never
+      // logged, persisted, or embedded in the generated link.
+      const secret = await bao.readSecret(apiPath);
+      const payload: SharedSecretPayload = {
+        source: apiPath,
+        wrapped_at: new Date().toISOString(),
+        data: secret.data?.data ?? {},
+      };
+      const wrapped = await bao.wrapResponse(payload, wrapTtl.trim());
+      setShareLink(shareLinkFor(wrapped.wrap_info.token));
+      addToast('success', 'One-time link created', `Valid for ${wrapTtl.trim()}, single use.`);
+    } catch (error) {
+      setShareError(error instanceof Error ? error.message : 'Could not create the link.');
+    } finally {
+      setShareBusy(false);
+    }
   }
 
   return (
@@ -106,6 +148,47 @@ export function AutomationPage() {
             </div>
           </div>
 
+          <div className="panel" data-testid="share-link-panel">
+            <div className="panel__head"><Link2 size={17} /><h3>One-time share link</h3></div>
+            <div className="panel__body grid" style={{ gap: '0.8rem' }}>
+              <p className="small muted">
+                Wrap the current secret's response into a short-lived, single-use link. The recipient
+                sees the values once; the wrapping token expires on its own and is never stored here.
+              </p>
+              <div className="field">
+                <label htmlFor="wrap-ttl">Link lifetime</label>
+                <input
+                  id="wrap-ttl" list="wrap-ttl-presets" className="mono"
+                  value={wrapTtl} onChange={(event) => setWrapTtl(event.target.value)}
+                  data-testid="wrap-ttl"
+                />
+                <datalist id="wrap-ttl-presets">
+                  {WRAP_TTL_PRESETS.map((preset) => (
+                    <option key={preset.value} value={preset.value}>{preset.label}</option>
+                  ))}
+                </datalist>
+                {validWrapTtl(wrapTtl)
+                  ? <span className="field-hint">Go duration such as 5m, 1h or 24h</span>
+                  : <span className="field-error">Use a Go duration like 5m, 1h or 24h</span>}
+              </div>
+              <div className="notice warning small">
+                Anyone with the link can read these values once. Share it over a trusted channel.
+              </div>
+              <Button
+                variant="primary" size="small" data-testid="create-share-link"
+                disabled={!canWrap || !validWrapTtl(wrapTtl) || shareBusy}
+                loading={shareBusy}
+                onClick={() => void handleShare()}
+              >
+                Create one-time link
+              </Button>
+              {!canWrap && (
+                <p className="small muted">Requires read access to this path and <span className="mono">update</span> on <span className="mono">sys/wrapping/wrap</span>.</p>
+              )}
+              {shareError && <div className="notice error small" data-testid="share-error">{shareError}</div>}
+            </div>
+          </div>
+
           <div className="panel">
             <div className="panel__head"><h3>How this console stays agent-safe</h3></div>
             <div className="panel__body grid" style={{ gap: '0.6rem' }}>
@@ -118,6 +201,31 @@ export function AutomationPage() {
           </div>
         </div>
       </div>
+
+      {shareLink && (
+        <Dialog
+          title="One-time link ready"
+          testId="share-link-dialog"
+          onClose={() => setShareLink(null)}
+          footer={<Button variant="primary" data-testid="share-link-done" onClick={() => setShareLink(null)}>Done</Button>}
+        >
+          <div className="grid" style={{ gap: '0.8rem' }}>
+            <div className="notice warning small">
+              This link works once and then expires. It is shown only here — closing this dialog
+              removes it from the screen. It is never written to storage.
+            </div>
+            <div className="field">
+              <label>Share link</label>
+              <code
+                className="mono"
+                data-testid="share-link-value"
+                style={{ display: 'block', overflowWrap: 'anywhere', padding: '0.6rem', background: 'var(--color-background)', borderRadius: 'var(--radius-md)' }}
+              >{shareLink}</code>
+            </div>
+            <div><CopyButton value={shareLink} label="Copy share link" /></div>
+          </div>
+        </Dialog>
+      )}
     </div>
   );
 }

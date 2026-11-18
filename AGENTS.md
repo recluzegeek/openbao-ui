@@ -8,6 +8,7 @@ semantic HTML, explicit `data-testid` hooks, and no hidden state.
 | Route | Purpose | Search params |
 | --- | --- | --- |
 | `/login` | token/userpass sign-in, sealed-server unseal | — |
+| `/unwrap` | recipient view for a one-time share link (works signed out) | wrapping token in `#wrap=` fragment |
 | `/welcome` | getting-started checklist that follows live server state | — |
 | `/secrets` | environment-aware KV browser | `project`, `env`, `service`, `folder` |
 | `/trash` | soft-deleted KV versions recoverable from metadata (no values shown) | `project` |
@@ -94,6 +95,8 @@ and wired into `capabilityPathsForSecret()` / `capabilityPathsForFolder()`.
 - `policy-rules` / `policy-rule-<n>` / `save-policy` — visual policy builder
 - `simulator-run` / `simulator-result-<path>` — capability simulator and its result rows
 - `identity-kind-<kind>` / `identity-snippet-cli` / `identity-snippet-http` — machine-identity wizard
+- `share-link-panel` / `wrap-ttl` / `create-share-link` / `share-link-dialog` / `share-link-value` / `share-link-done` — one-time link creation (For agents page)
+- `unwrap-page` / `unwrap-reveal` / `unwrap-success` / `unwrap-source` / `unwrap-fields` / `unwrap-field-<key>` — one-time link recipient view
 - `audit-search` / `audit-actor` / `audit-operation` / `audit-range` — audit filters; `audit-table` / `audit-entry-<n>` — results
 - `welcome-page` — getting-started guide (`data-stage` = derived server stage); `welcome-step-<id>` — checklist steps
 - `onboarding-banner` / `onboarding-open` / `onboarding-dismiss` — first-run hint on `/secrets`
@@ -123,6 +126,12 @@ The first-run banner is remembered in `localStorage` under `console.onboarding`;
 restores it. Global shortcuts are `⌘K/Ctrl+K` (palette), `Alt+1`–`Alt+8` (sidebar sections), `/`
 (search), `?` (shortcut help) and `Esc`; they pause while typing in a field. A skip link and a
 `prefers-reduced-motion` rule are in the app shell and global CSS.
+
+**One-time links:** the For agents page can wrap a secret's response via `POST sys/wrapping/wrap`
+with an `X-Vault-Wrap-TTL` header and build a link to `/unwrap#wrap=<token>` (`src/lib/wrapping.ts`).
+The wrapping token lives only in the URL fragment (never the path/query, storage or logs) and the
+recipient view unwraps it once with the token as its auth header, then clears it from the address
+bar. Wrapped values are masked by default and re-mask on their own.
 
 **Session lease:** `lookup-self` returns `renewable` and `expire_time`; the sidebar shows a per-second
 countdown (`sessionSecondsLeft()` / `useSessionCountdown()` in `src/lib/session.ts`, going urgent below

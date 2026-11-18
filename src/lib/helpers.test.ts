@@ -7,6 +7,7 @@ import { dataFromRows, fieldNameError, rowsFromData, validSecretName, validateRo
 import { bao, normalizeNamespace, request, setBaoConfig } from './api';
 import { mergeEffectivePolicies } from './auth';
 import { sessionSecondsLeft } from './session';
+import { shareLinkFor, validWrapTtl, wrappingTokenFromHash } from './wrapping';
 import { capabilityPathsForFolder, capabilityPathsForSecret, environmentCreationTarget, runbookCapabilityPaths } from './queries';
 import { environmentMarkerPath, inferLayout, physicalPath, type ClassifiedSecret, type LayoutProfile } from './layout';
 import { clearProjectLayouts, registerProjectLayout, resolveApiPath, resolveEnvMetadataPath, toLogicalPath } from './layoutResolver';
@@ -740,6 +741,53 @@ describe('session hardening', () => {
       method: 'POST',
       body: { custom_metadata: { owner: 'team-a' }, max_versions: 0, cas_required: true, delete_version_after: '0s' },
     });
+  });
+});
+
+describe('response wrapping / one-time share links', () => {
+  it('builds and parses fragment-based share links without leaking the token to the path', () => {
+    const token = 'hvs.CAESIJ-example.wrapping.token';
+    const link = shareLinkFor(token, 'http://127.0.0.1:5173');
+    expect(link).toBe(`http://127.0.0.1:5173/unwrap#wrap=${encodeURIComponent(token)}`);
+    expect(link).not.toContain('?');
+    expect(wrappingTokenFromHash(`#wrap=${encodeURIComponent(token)}`)).toBe(token);
+    expect(wrappingTokenFromHash('#wrap=' + token + '&x=1')).toBe(token);
+    expect(wrappingTokenFromHash('')).toBeNull();
+    expect(wrappingTokenFromHash('#other=abc')).toBeNull();
+  });
+
+  it('accepts only safe Go durations for wrap TTL', () => {
+    expect(validWrapTtl('5m')).toBe(true);
+    expect(validWrapTtl('90s')).toBe(true);
+    expect(validWrapTtl('24h')).toBe(true);
+    expect(validWrapTtl('30 days')).toBe(false);
+    expect(validWrapTtl('')).toBe(false);
+  });
+
+  it('wraps with X-Vault-Wrap-TTL and unwraps using the wrapping token', async () => {
+    setBaoConfig({ token: 'test-token' });
+    const fetchStub = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        text: async () => JSON.stringify({ wrap_info: { token: 'hvs.wrap', ttl: 300 } }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        text: async () => JSON.stringify({ data: { source: 'a/b', data: { KEY: 'value' } } }),
+      } as unknown as Response);
+
+    const wrapped = await bao.wrapResponse({ source: 'a/b', data: {} }, '5m');
+    expect(wrapped.wrap_info.token).toBe('hvs.wrap');
+    const [wrapUrl, wrapInit] = fetchStub.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(String(wrapUrl)).toContain('/v1/sys/wrapping/wrap');
+    expect((wrapInit.headers as Record<string, string>)['X-Vault-Wrap-TTL']).toBe('5m');
+
+    const unwrapped = await bao.unwrapResponse('hvs.wrap');
+    expect((unwrapped.data as { source: string }).source).toBe('a/b');
+    const [unwrapUrl, unwrapInit] = fetchStub.mock.calls[1] as unknown as [URL, RequestInit];
+    expect(String(unwrapUrl)).toContain('/v1/sys/wrapping/unwrap');
+    // The wrapping token, not the session token, authenticates the unwrap.
+    expect((unwrapInit.headers as Record<string, string>)['X-Vault-Token']).toBe('hvs.wrap');
   });
 });
 

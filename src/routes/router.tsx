@@ -4,6 +4,7 @@ import { EmptyState } from '@/components/common/Extras';
 import { LoginPage } from '@/features/auth/LoginPage';
 import { SecretsPage } from '@/features/secrets/SecretsPage';
 import { TrashPage } from '@/features/secrets/TrashPage';
+import { UnwrapPage } from '@/features/secrets/UnwrapPage';
 import { CodesPage } from '@/features/totp/CodesPage';
 import { AutomationPage } from '@/features/automation/AutomationPage';
 import { RunbooksPage } from '@/features/runbooks/RunbooksPage';
@@ -21,6 +22,12 @@ const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/login',
   component: LoginPage,
+});
+
+const unwrapRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/unwrap',
+  component: UnwrapPage,
 });
 
 const appRoute = createRoute({
@@ -120,6 +127,7 @@ const accessRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
+  unwrapRoute,
   appRoute.addChildren([indexRoute, secretsRoute, trashRoute, searchRoute, codesRoute, automationRoute, runbooksRoute, accessRoute, auditRoute, welcomeRoute]),
 ]);
 
