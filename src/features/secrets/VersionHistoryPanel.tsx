@@ -103,20 +103,34 @@ export function VersionHistoryPanel({
   }, [revealed]);
   useEffect(() => { setRevealed(false); }, [left, right]);
 
+  // A secret with a single version defaults A and B to the same number. Query
+  // each version once so React Query does not warn about duplicate keys.
+  const queryVersions = useMemo(
+    () => [...new Set([left, right].filter((version): version is number => version !== undefined))],
+    [left, right],
+  );
   const versionQueries = useQueries({
-    queries: [left, right].map((version) => ({
+    queries: queryVersions.map((version) => ({
       queryKey: ['secret', project, env, service, 'version', version],
       queryFn: () => bao.readSecret(secretApiPath(project, env, service), version),
       enabled: version !== undefined,
       retry: false,
     })),
   });
+  const dataByVersion = useMemo(() => {
+    const map = new Map<number, Record<string, unknown>>();
+    queryVersions.forEach((version, index) => {
+      const data = versionQueries[index]?.data?.data.data;
+      if (data) map.set(version, data);
+    });
+    return map;
+  }, [queryVersions, versionQueries]);
 
   const diff = useMemo(() => {
-    const first = versionQueries[0]?.data?.data.data;
-    const second = versionQueries[1]?.data?.data.data;
+    const first = left !== undefined ? dataByVersion.get(left) : undefined;
+    const second = right !== undefined ? dataByVersion.get(right) : undefined;
     return first && second ? diffData(first, second) : [];
-  }, [versionQueries]);
+  }, [dataByVersion, left, right]);
   const shown = onlyChanges ? diff.filter((item) => item.status !== 'same') : diff;
   const entries = audit.data?.entries ?? [];
 

@@ -16,6 +16,26 @@ import { deriveSetupStage } from './setup';
 import { kvDataPath, kvListPath, type KvMountInfo } from './kvMounts';
 
 const METADATA_SAMPLE = 80;
+/** Keep discovery responsive without flooding the server with metadata reads. */
+const METADATA_CONCURRENCY = 6;
+
+/** Run async work with bounded concurrency, preserving input order. */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
 
 function logicalParent(path: string): string {
   const slash = path.lastIndexOf('/');
@@ -66,14 +86,16 @@ export async function fetchLayoutDiscovery(project: string): Promise<LayoutDisco
   const rawPaths = allPaths.filter((path) => !isMarker(path));
   const metadataByPath: Record<string, Record<string, string>> = {};
   // Markers carry the environment metadata, so sample them before secrets.
-  for (const path of [...markers, ...rawPaths].slice(0, METADATA_SAMPLE)) {
+  // Reads are bounded-parallel: roomsss has ~100 leaves, and doing 80 of them
+  // one at a time left the environment switcher empty for many seconds.
+  await mapWithConcurrency([...markers, ...rawPaths].slice(0, METADATA_SAMPLE), METADATA_CONCURRENCY, async (path) => {
     try {
       const meta = await bao.readMetadata(path);
       if (meta.data.custom_metadata) metadataByPath[path] = meta.data.custom_metadata;
     } catch {
       // Metadata may be unreadable for this token; heuristics still apply.
     }
-  }
+  });
   const result = inferLayout(allPaths, metadataByPath);
   const classified = result.classified.filter((secret) => !isMarker(secret.physical));
   const environments = [...new Set(result.classified.map((secret) => secret.env))];
@@ -413,6 +435,45 @@ export function usePolicy(name?: string) {
 
 export function useEntities() {
   return useQuery({ queryKey: ['entities'], queryFn: () => bao.listEntities(), staleTime: 60_000 });
+}
+
+/** Identity groups are the backing store for Teams. */
+export function useGroups() {
+  return useQuery({ queryKey: ['identity-groups'], queryFn: () => bao.listGroups(), staleTime: 60_000 });
+}
+
+export function useGroup(name?: string) {
+  return useQuery({
+    queryKey: ['identity-group', name],
+    queryFn: () => bao.readGroup(name!),
+    enabled: Boolean(name),
+    staleTime: 30_000,
+  });
+}
+
+export function useUserpassUsers() {
+  return useQuery({ queryKey: ['userpass-users'], queryFn: () => bao.listUserpassUsers(), staleTime: 60_000 });
+}
+
+export function useUserpassUser(username?: string) {
+  return useQuery({
+    queryKey: ['userpass-user', username],
+    queryFn: () => bao.readUserpassUser(username!),
+    enabled: Boolean(username),
+    staleTime: 30_000,
+  });
+}
+
+/** Capability probe paths for team and people management. */
+export function teamCapabilityPaths(): string[] {
+  return [
+    'identity/group/name',
+    'identity/group/name/__new__',
+    'identity/entity/name',
+    'auth/userpass/users',
+    'auth/userpass/users/__new__',
+    'sys/policies/acl/',
+  ];
 }
 
 export function useAuthMethods() {

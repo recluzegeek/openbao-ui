@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { Activity, ArrowRight, Clock3, Compass, CornerDownLeft, KeyRound, Search, Shield, Star, Trash2 } from 'lucide-react';
 import { folderOf, loadFavorites, loadRecent, type SecretRef } from '@/lib/navigationMemory';
+import { matchesSearch } from '@/lib/searchMatch';
 
 interface Action {
   id: string;
@@ -120,10 +121,7 @@ export function CommandPalette() {
     return [searchAction, ...routeActions, ...recentActions, ...favoriteActions];
   }, [navigate, query, open]);
 
-  const filtered = actions.filter((action) => {
-    const q = query.trim().toLowerCase();
-    return !q || action.label.toLowerCase().includes(q) || action.group.toLowerCase().includes(q);
-  });
+  const filtered = actions.filter((action) => matchesSearch([action.label, action.group], query));
 
   function run(action: Action) {
     setOpen(false);

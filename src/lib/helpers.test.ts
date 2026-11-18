@@ -18,6 +18,8 @@ import { environmentTabs, groupFieldsByPrefix } from './secretGroups';
 import { buildReferenceLookup, findReferences, parseKeyValueText, resolveReferences, serializeKeyValue } from './secretFormats';
 import { effectiveValue, mergeAnnotations, overridesFor, parseAnnotations, withOverridesFor } from './secretMetadata';
 import { actorForVersion, diffData, otherVersion } from './secretDiff';
+import { matchesSearch, normalizeSearch, uniqueBy } from './searchMatch';
+import { parseTeamName, teamsSharingPolicy } from './teams';
 import { promotionPreview, promotionSummary } from './promotion';
 import { deletedVersions, durationError, versionSettingsFrom, versionState } from './secretLifecycle';
 import { isFavorite, loadFavorites, loadRecent, pushRecent, secretHref, toggleFavorite } from './navigationMemory';
@@ -519,6 +521,30 @@ describe('server-driven layout discovery', () => {
     expect(physicalPath(result.profile, 'tgc', 'production', 'backend-api/database/postgres'))
       .toBe('tgc/backend-api/production/database/postgres');
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('treats ph_scope_tabs as a component when the path already names the environment', () => {
+    const result = inferLayout(
+      [
+        'roomsss/mfe-roomsss-account/development/session',
+        'roomsss/prelaunch/development/session',
+      ],
+      {
+        'roomsss/mfe-roomsss-account/development/session': {
+          ph_project: 'roomsss', ph_scope_tabs: 'mfe-roomsss-account', ph_component_tabs: 'Frontend',
+        },
+        'roomsss/prelaunch/development/session': {
+          ph_project: 'roomsss', ph_scope_tabs: 'Prelaunch', ph_component_tabs: 'Frontend',
+        },
+      },
+    );
+    expect(result.profile.kind).toBe('project-repo-env');
+    expect([...new Set(result.classified.map((secret) => secret.env))]).toEqual(['development']);
+    expect(result.classified[0]).toMatchObject({
+      env: 'development', logical: 'mfe-roomsss-account/session', component: 'mfe-roomsss-account', source: 'metadata',
+    });
+    expect(physicalPath(result.profile, 'roomsss', 'development', 'mfe-roomsss-account/session'))
+      .toBe('roomsss/mfe-roomsss-account/development/session');
   });
 
   it('warns at warning level and keeps raw paths when heuristics disagree', () => {
@@ -1152,5 +1178,55 @@ describe('editor change count', () => {
     expect(countFieldChanges({ A: '1' }, {})).toBe(1);
     expect(countFieldChanges({}, { A: '1' })).toBe(1);
     expect(countFieldChanges({ A: '1' }, { A: '1' })).toBe(0);
+  });
+});
+
+describe('shared search policy', () => {
+  it('is case- and diacritic-insensitive', () => {
+    expect(matchesSearch(['Café Production'], 'cafe prod')).toBe(true);
+    expect(matchesSearch(['billing', 'production'], 'PROD billing')).toBe(true);
+    expect(matchesSearch(['billing'], '')).toBe(true);
+  });
+
+  it('requires every token to match', () => {
+    expect(matchesSearch(['billing', 'production'], 'billing staging')).toBe(false);
+    expect(matchesSearch([undefined, 'postgres'], 'postgres')).toBe(true);
+    expect(normalizeSearch('  Ünïcode  ')).toBe('unicode');
+  });
+
+  it('dedupes merged result sources by id', () => {
+    const items = [{ id: 'a', n: 1 }, { id: 'a', n: 2 }, { id: 'b', n: 3 }];
+    expect(uniqueBy(items, (item) => item.id)).toEqual([{ id: 'a', n: 1 }, { id: 'b', n: 3 }]);
+  });
+});
+
+describe('team name parsing', () => {
+  it('parses the team-project-role convention', () => {
+    expect(parseTeamName('team-trucking-leads', ['trucking', 'tgc'])).toEqual({
+      name: 'team-trucking-leads', project: 'trucking', role: 'leads', conventional: true,
+    });
+  });
+
+  it('prefers the longest project match so dashed projects parse correctly', () => {
+    expect(parseTeamName('team-acme-eu-leads', ['acme', 'acme-eu'])).toMatchObject({
+      project: 'acme-eu', role: 'leads', conventional: true,
+    });
+  });
+
+  it('treats non-conventional groups as plain teams', () => {
+    expect(parseTeamName('platform-oncall', ['trucking'])).toEqual({
+      name: 'platform-oncall', project: '', role: 'platform-oncall', conventional: false,
+    });
+  });
+});
+
+describe('teams sharing a policy', () => {
+  it('finds other teams with overlapping access and excludes itself', () => {
+    const teams = [
+      { name: 'team-a-leads', policies: ['a-lead', 'shared'] },
+      { name: 'team-b-leads', policies: ['b-lead', 'shared'] },
+      { name: 'team-c-viewers', policies: ['c-viewer'] },
+    ];
+    expect(teamsSharingPolicy(teams, teams[0]).map((team) => team.name)).toEqual(['team-b-leads']);
   });
 });

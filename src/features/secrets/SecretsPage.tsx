@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
-import { useNavigate, useRouterState } from '@tanstack/react-router';
+import { useBlocker, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowRightLeft,
@@ -22,6 +22,8 @@ import {
   Plus,
   Search,
   Tag,
+  Trash2,
+  Undo2,
   Upload,
   UserRound,
 } from 'lucide-react';
@@ -42,6 +44,7 @@ import {
   type SecretAnnotations,
 } from '@/lib/secretMetadata';
 import { buildSecretTree, folderBreadcrumbs, folderInTree, secretName, validSecretPath, type SecretTreeFolder } from '@/lib/secretTree';
+import { matchesSearch } from '@/lib/searchMatch';
 import { environmentTabs, groupFieldsByPrefix } from '@/lib/secretGroups';
 import { useAuth } from '@/lib/auth';
 import {
@@ -84,7 +87,7 @@ function editorSnapshot(editor: EditorState): string {
   return JSON.stringify({ name: editor.name, rows: editor.rows, annotations: editor.annotations });
 }
 
-function SecretField({ name, value, comment, override, resolved, resetKey }: {
+function SecretField({ name, value, comment, override, resolved, resetKey, editable, editing, draftValue, removed, staged, nextField, onStartEdit, onStage, onCancelEdit, onRemove, onUndoRemove }: {
   name: string;
   value: unknown;
   comment?: string;
@@ -92,9 +95,26 @@ function SecretField({ name, value, comment, override, resolved, resetKey }: {
   resolved?: string;
   /** Changing secret/version re-masks everything, so values never stay open across navigation. */
   resetKey?: string;
+  /** Inline editing is only offered when the token can write this secret. */
+  editable?: boolean;
+  editing?: boolean;
+  draftValue?: string | null;
+  removed?: boolean;
+  /** A key that does not exist on the server yet. */
+  staged?: boolean;
+  nextField?: string;
+  onStartEdit?: (name: string) => void;
+  onStage?: (name: string, value: string, nextField?: string) => void;
+  onCancelEdit?: () => void;
+  onRemove?: (name: string) => void;
+  onUndoRemove?: (name: string) => void;
 }) {
   const [revealed, setRevealed] = useState(false);
+  const [draft, setDraft] = useState('');
   useEffect(() => { setRevealed(false); }, [resetKey]);
+  useEffect(() => {
+    if (editing) setDraft(draftValue ?? String(value ?? ''));
+  }, [editing, draftValue, value]);
   // A revealed value re-masks on its own; nothing stays on screen indefinitely.
   useEffect(() => {
     if (!revealed) return;
@@ -103,16 +123,64 @@ function SecretField({ name, value, comment, override, resolved, resetKey }: {
   }, [revealed]);
   const overridden = override !== undefined;
   const actual = effectiveValue(name, value, overridden ? { [name]: override! } : {});
+  const changed = staged || (draftValue !== undefined && draftValue !== null && draftValue !== String(value ?? ''));
   const display = revealed ? actual : mask(value);
 
+  function stage(next?: string) {
+    onStage?.(name, draft, next);
+  }
+
   return (
-    <div className="secret-field" data-testid={`field-${name}`}>
+    <div
+      className={`secret-field${removed ? ' secret-field--removed' : ''}${changed ? ' secret-field--changed' : ''}`}
+      data-testid={`field-${name}`}
+      data-inline-field={name}
+    >
       <span className="secret-field__key" title={name}>
         {name}
+        {changed && <Badge size="small" variant={staged ? 'success' : 'warning'} title={staged ? 'New key, not saved yet' : 'Staged change, not saved yet'}>{staged ? 'new' : 'staged'}</Badge>}
         {overridden && <Badge size="small" variant="info" title="Personal override is applied for this identity"><UserRound size={11} /> override</Badge>}
         {comment && <span className="secret-field__comment" title={comment}><MessageSquareText size={12} /> {comment}</span>}
       </span>
-      <span className={`secret-field__value ${revealed ? '' : 'masked'}`}>{display}</span>
+      {editing ? (
+        <span className="secret-field__editor">
+          <input
+            autoFocus
+            className="mono"
+            data-testid={`edit-value-${name}`}
+            aria-label={`Value for ${name}`}
+            value={draft}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                stage();
+              } else if (event.key === 'Escape') {
+                event.preventDefault();
+                onCancelEdit?.();
+              } else if (event.key === 'Tab' && !event.shiftKey && nextField) {
+                event.preventDefault();
+                stage(nextField);
+              }
+            }}
+          />
+          <button type="button" className="btn btn--primary btn--small" onMouseDown={(event) => event.preventDefault()} onClick={() => stage()}>
+            Stage
+          </button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          className={`secret-field__value secret-field__value--button ${revealed ? '' : 'masked'}`}
+          onClick={() => (editable ? onStartEdit?.(name) : setRevealed((current) => !current))}
+          title={removed ? 'This key will be removed when you save' : editable ? 'Click to edit this value' : revealed ? 'Hide' : 'Reveal'}
+          aria-label={editable ? `Edit ${name}` : revealed ? `Hide ${name}` : `Reveal ${name}`}
+        >
+          {removed ? 'removed on save' : display}
+        </button>
+      )}
       <span className="secret-field__actions">
         <button
           className="icon-btn"
@@ -123,6 +191,20 @@ function SecretField({ name, value, comment, override, resolved, resetKey }: {
           {revealed ? <EyeOff size={16} /> : <Eye size={16} />}
         </button>
         <CopyButton value={actual} label={`Copy ${name}`} />
+        {editable && !editing && (
+          <button className="icon-btn" onClick={() => onStartEdit?.(name)} aria-label={`Edit ${name}`} title="Edit this value inline">
+            <Pencil size={15} />
+          </button>
+        )}
+        {editable && removed ? (
+          <button className="icon-btn" onClick={() => onUndoRemove?.(name)} aria-label={`Keep ${name}`} title="Undo removal">
+            <Undo2 size={15} />
+          </button>
+        ) : editable && (
+          <button className="icon-btn" onClick={() => onRemove?.(name)} aria-label={`Remove ${name}`} title="Remove this key on save">
+            <Trash2 size={15} />
+          </button>
+        )}
       </span>
       {resolved && (
         <span className="secret-field__resolved mono" title="Resolved from references in this environment">
@@ -130,6 +212,23 @@ function SecretField({ name, value, comment, override, resolved, resetKey }: {
         </span>
       )}
     </div>
+  );
+}
+
+function ReviewValue({ value }: { value: string }) {
+  const [revealed, setRevealed] = useState(false);
+  useEffect(() => {
+    if (!revealed) return;
+    const timer = window.setTimeout(() => setRevealed(false), 30_000);
+    return () => window.clearTimeout(timer);
+  }, [revealed]);
+  return (
+    <span className="review-value">
+      <span className={`mono ${revealed ? '' : 'masked'}`}>{revealed ? value : mask(value)}</span>
+      <button className="icon-btn" onClick={() => setRevealed((current) => !current)} aria-label={revealed ? 'Hide value' : 'Reveal value'} title={revealed ? 'Hide' : 'Reveal'}>
+        {revealed ? <EyeOff size={14} /> : <Eye size={14} />}
+      </button>
+    </span>
   );
 }
 
@@ -262,6 +361,9 @@ export function SecretsPage() {
   const discovery = useLayoutDiscovery(project);
   const environments = useEnvironments(project);
   const envs = useMemo(() => [...(environments.data ?? [])].sort(envRank), [environments.data]);
+  // Discovery walks the tree and samples metadata; show that instead of an
+  // empty select, which reads as "this project has no environments".
+  const envsLoading = Boolean(project) && (discovery.isLoading || environments.isLoading);
   const [env, setEnv] = useState<string | undefined>(search.env);
   const pathsQ = useSecretPaths(project, env);
   const tree = useMemo(() => buildSecretTree(pathsQ.data ?? []), [pathsQ.data]);
@@ -293,6 +395,19 @@ export function SecretsPage() {
   const [importTarget, setImportTarget] = useState('');
   const [exportFormat, setExportFormat] = useState<ImportFormat>('env');
   const [sourceEnv, setSourceEnv] = useState<string | null>(null);
+  // Inline editor (Concept A): staged value edits live in memory only and are
+  // written with a single `kv patch` for changed keys. Removals need a full
+  // write, because merge-patch cannot delete a key.
+  const [inlineDraft, setInlineDraft] = useState<Record<string, string | null>>({});
+  const [inlineEditing, setInlineEditing] = useState<string | null>(null);
+  const [inlineAddOpen, setInlineAddOpen] = useState(false);
+  const [inlineAddKey, setInlineAddKey] = useState('');
+  const [inlineAddValue, setInlineAddValue] = useState('');
+  const [inlineAddError, setInlineAddError] = useState<string | null>(null);
+  const [inlineReview, setInlineReview] = useState(false);
+  const [inlineError, setInlineError] = useState<string | null>(null);
+  const [savingInline, setSavingInline] = useState(false);
+  const [pendingInlineNav, setPendingInlineNav] = useState<(() => void) | null>(null);
 
   useEffect(() => {
     if (!project && projects.data?.length) setProject(search.project ?? projects.data[0]);
@@ -379,12 +494,9 @@ export function SecretsPage() {
   const canWriteMeta = can(caps, metaWritePath, 'update') ||
     Boolean(probe && can(caps, `kv/metadata/${probe}`, 'create'));
   const folderNode = folderInTree(tree, folder) ?? tree;
-  const filterText = filter.trim().toLowerCase();
-  const filteredSecrets = folderNode.secrets.filter((path) => {
-    if (!filterText) return true;
-    return secretName(path).toLowerCase().includes(filterText)
-      || (fieldNamesByPath[path] ?? []).some((name) => name.toLowerCase().includes(filterText));
-  });
+  const filterText = filter.trim();
+  const filteredSecrets = folderNode.secrets.filter((path) =>
+    matchesSearch([secretName(path), path, ...(fieldNamesByPath[path] ?? [])], filterText));
   const crumbs = folderBreadcrumbs(folder);
   const envView = environmentTabs(envs, env);
   const fieldGroups = useMemo(
@@ -392,6 +504,14 @@ export function SecretsPage() {
     [secretQ.data],
   );
   const resetKey = `${project ?? ''}/${env ?? ''}/${service ?? ''}/${version ?? 'latest'}`;
+  // A different secret, environment or version starts a fresh draft. The guard
+  // above asks before that happens; automatic reconciliation clears silently.
+  useEffect(() => {
+    setInlineDraft({});
+    setInlineEditing(null);
+    setInlineAddOpen(false);
+    setInlineError(null);
+  }, [resetKey]);
   const editorChanges = useMemo(() => {
     if (!editor || !editorBaseline) return 0;
     try {
@@ -403,6 +523,129 @@ export function SecretsPage() {
       return 0;
     }
   }, [editor, editorBaseline]);
+
+  const inlineBase = secretQ.data?.data.data ?? {};
+  const inlineChanges = useMemo(
+    () => Object.entries(inlineDraft).filter(([key, value]) => (
+      value === null ? Object.prototype.hasOwnProperty.call(inlineBase, key) : String(inlineBase[key] ?? '') !== value
+    )),
+    [inlineDraft, inlineBase],
+  );
+  const inlineDirty = inlineChanges.length > 0;
+  const inlineOrder = useMemo(() => fieldGroups.flatMap((group) => group.fields.map(([key]) => key)), [fieldGroups]);
+  const blocker = useBlocker({
+    shouldBlockFn: () => inlineDirty,
+    enableBeforeUnload: inlineDirty,
+    withResolver: true,
+  });
+
+  // Moving to another secret/folder/environment drops the staged values, so ask
+  // first. The same guard covers route changes through `useBlocker`.
+  function guardInline(run: () => void) {
+    if (inlineDirty) setPendingInlineNav(() => run);
+    else run();
+  }
+
+  function stageInline(key: string, value: string, nextField?: string) {
+    setInlineDraft((current) => ({ ...current, [key]: value }));
+    setInlineError(null);
+    if (nextField) setInlineEditing(nextField);
+    else setInlineEditing(null);
+  }
+
+  function removeInline(key: string) {
+    setInlineDraft((current) => ({ ...current, [key]: null }));
+    setInlineEditing(null);
+  }
+
+  function undoRemoveInline(key: string) {
+    setInlineDraft((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }
+
+  function discardInline() {
+    setInlineDraft({});
+    setInlineEditing(null);
+    setInlineError(null);
+    setInlineAddOpen(false);
+  }
+
+  function addInlineField() {
+    const key = inlineAddKey.trim();
+    if (!key) {
+      setInlineAddError('Enter a key name.');
+      return;
+    }
+    if (!/^[A-Za-z0-9_.-]+$/.test(key)) {
+      setInlineAddError('Use letters, numbers, dot, dash or underscore.');
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(inlineBase, key) || Object.prototype.hasOwnProperty.call(inlineDraft, key)) {
+      setInlineAddError(`"${key}" already exists in this secret.`);
+      return;
+    }
+    setInlineDraft((current) => ({ ...current, [key]: inlineAddValue }));
+    setInlineAddKey('');
+    setInlineAddValue('');
+    setInlineAddError(null);
+    setInlineAddOpen(false);
+  }
+
+  async function saveInline() {
+    if (!project || !env || !service || !secretQ.data || !inlineDirty) return;
+    setSavingInline(true);
+    setInlineError(null);
+    const before = { ...secretQ.data.data.data };
+    const updates: Record<string, string> = {};
+    const removals: string[] = [];
+    for (const [key, value] of inlineChanges) {
+      if (value === null) removals.push(key);
+      else updates[key] = value;
+    }
+    try {
+      if (removals.length > 0) {
+        // A merge patch cannot delete keys, so removals need a full write. Use
+        // CAS so a concurrent edit is reported rather than silently clobbered.
+        const next = { ...before };
+        for (const key of removals) delete next[key];
+        Object.assign(next, updates);
+        await bao.writeSecret(apiPath, next, secretQ.data.data.metadata.version);
+      } else {
+        await bao.patchSecret(
+          apiPath,
+          updates,
+          metadataQ.data?.data.cas_required ? secretQ.data.data.metadata.version : undefined,
+        );
+      }
+      await queryClient.invalidateQueries();
+      const summary = [
+        Object.keys(updates).length ? `${Object.keys(updates).length} updated` : '',
+        removals.length ? `${removals.length} removed` : '',
+      ].filter(Boolean).join(' · ');
+      addToast(
+        'success',
+        'Changes saved',
+        summary,
+        {
+          label: 'Undo',
+          onClick: () => {
+            void bao.writeSecret(apiPath, before)
+              .then(() => queryClient.invalidateQueries())
+              .then(() => addToast('info', 'Changes undone', 'The previous field set was restored.'))
+              .catch((error) => addToast('error', 'Undo failed', error instanceof Error ? error.message : undefined));
+          },
+        },
+      );
+      discardInline();
+    } catch (error) {
+      setInlineError(error instanceof Error ? error.message : 'Save failed');
+    } finally {
+      setSavingInline(false);
+    }
+  }
 
   function updateRow(id: string, patch: Partial<FieldRow>) {
     setEditor((current) => {
@@ -598,9 +841,12 @@ export function SecretsPage() {
     }
   }
 
-  async function openAddField() {
-    await openEdit();
-    addRow();
+  function openAddFieldInline() {
+    setInlineAddError(null);
+    setInlineAddKey('');
+    setInlineAddValue('');
+    setInlineAddOpen(true);
+    setInlineEditing(null);
   }
 
   async function saveEditor() {
@@ -741,13 +987,16 @@ export function SecretsPage() {
             id="project"
             value={project ?? ''}
             onChange={(event) => {
-              // Reset env/folder too: keeping them across projects is the
-              // single-environment dead end (the new project has no such env).
-              setProject(event.target.value);
-              setEnv(undefined);
-              setFolder('');
-              setService(undefined);
-              setVersion(undefined);
+              const next = event.target.value;
+              guardInline(() => {
+                // Reset env/folder too: keeping them across projects is the
+                // single-environment dead end (the new project has no such env).
+                setProject(next);
+                setEnv(undefined);
+                setFolder('');
+                setService(undefined);
+                setVersion(undefined);
+              });
             }}
           >
             {projects.isLoading && <option>Loading…</option>}
@@ -756,50 +1005,64 @@ export function SecretsPage() {
         </div>
         <div className="field" style={{ flex: 1 }}>
           <label htmlFor="environment">Environment</label>
-          {envs.length <= 1 ? (
-            // Always a real control, even with one environment. A plain <div>
-            // looked inert and left new users unable to tell it was selected.
-            <select
-              id="environment"
-              data-testid="environment-control"
-              value={env ?? ''}
-              disabled={envs.length === 0}
-              onChange={(event) => { if (event.target.value) { setEnv(event.target.value); setService(undefined); setVersion(undefined); } }}
-              title={envs.length === 0 ? 'No environment could be discovered for this project' : 'Browse this environment'}
-            >
-              {envs.length === 0 ? <option value="">No environment</option> : envs.map((name) => <option key={name} value={name}>{name}</option>)}
-            </select>
-          ) : (
-            <div className="env-tabs" role="group" aria-label="Environment" data-testid="environment-control">
-              {envView.tabs.map((name) => {
-                const allowed = can(caps, project ? envMetadataPath(project, name) : '', 'list');
-                return (
-                  <button
-                    key={name}
-                    aria-pressed={env === name}
-                    onClick={() => { setEnv(name); setService(undefined); setVersion(undefined); }}
-                    title={allowed ? `Browse ${name}` : 'Your token cannot list this environment'}
+          <div className="env-switcher">
+            {envs.length <= 1 ? (
+              // Always a real control, even with one environment. A plain <div>
+              // looked inert and left new users unable to tell it was selected.
+              <select
+                id="environment"
+                data-testid="environment-control"
+                value={env ?? ''}
+                disabled={envsLoading || envs.length === 0}
+                onChange={(event) => { if (event.target.value) { const next = event.target.value; guardInline(() => { setTab('env'); setEnv(next); setService(undefined); setVersion(undefined); }); } }}
+                title={envsLoading ? 'Discovering environments…' : envs.length === 0 ? 'No environment could be discovered for this project' : 'Browse this environment'}
+              >
+                {envsLoading
+                  ? <option value="">Loading environments…</option>
+                  : envs.length === 0
+                    ? <option value="">No environment</option>
+                    : envs.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+            ) : (
+              <div className="env-tabs" role="group" aria-label="Environment" data-testid="environment-control">
+                {envView.tabs.map((name) => {
+                  const allowed = can(caps, project ? envMetadataPath(project, name) : '', 'list');
+                  return (
+                    <button
+                      key={name}
+                      aria-pressed={tab === 'env' && env === name}
+                      onClick={() => guardInline(() => { setTab('env'); setEnv(name); setService(undefined); setVersion(undefined); })}
+                      title={allowed ? `Browse ${name}` : 'Your token cannot list this environment'}
+                    >
+                      {name}
+                    </button>
+                  );
+                })}
+                {envView.more.length > 0 && (
+                  <select
+                    aria-label="More environments"
+                    value={env && envView.more.includes(env) ? env : ''}
+                    onChange={(event) => { if (event.target.value) { const next = event.target.value; guardInline(() => { setTab('env'); setEnv(next); setService(undefined); setVersion(undefined); }); } }}
                   >
-                    {name}
-                  </button>
-                );
-              })}
-              {envView.more.length > 0 && (
-                <select
-                  aria-label="More environments"
-                  value={env && envView.more.includes(env) ? env : ''}
-                  onChange={(event) => { if (event.target.value) { setEnv(event.target.value); setService(undefined); setVersion(undefined); } }}
-                >
-                  <option value="">+{envView.more.length} more</option>
-                  {envView.more.map((name) => <option key={name} value={name}>{name}</option>)}
-                </select>
-              )}
-            </div>
-          )}
-        </div>
-        <div className="search">
-          <Search size={16} aria-hidden="true" />
-          <input aria-label="Filter services" placeholder="Filter secrets…" value={filter} onChange={(event) => setFilter(event.target.value)} />
+                    <option value="">+{envView.more.length} more</option>
+                    {envView.more.map((name) => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                )}
+              </div>
+            )}
+            {/* Shared credentials are project-level, so they live in the same
+                switcher as environments instead of a separate tab row. */}
+            <button
+              type="button"
+              className={`tab ${tab === 'creds' ? 'active' : ''}`}
+              aria-pressed={tab === 'creds'}
+              data-testid="shared-credentials-tab"
+              onClick={() => guardInline(() => setTab('creds'))}
+              title="Project-level shared credentials"
+            >
+              Shared
+            </button>
+          </div>
         </div>
       </div>
 
@@ -808,11 +1071,6 @@ export function SecretsPage() {
         discovery={discovery.data}
         error={discovery.error}
       />
-
-      <div className="tabs" role="tablist" aria-label="Secret views" style={{ marginBottom: '-0.4rem' }}>
-        <button className={`btn btn--${tab === 'env' ? 'primary' : 'outlined'} btn--small`} role="tab" aria-selected={tab === 'env'} onClick={() => setTab('env')}>Environment secrets</button>
-        <button className={`btn btn--${tab === 'creds' ? 'primary' : 'outlined'} btn--small`} role="tab" aria-selected={tab === 'creds'} onClick={() => setTab('creds')}>Shared credentials</button>
-      </div>
 
       {tab === 'creds' ? (
         project ? <CredentialsPanel project={project} caps={caps} /> : <EmptyState title="Choose a project" />
@@ -840,7 +1098,7 @@ export function SecretsPage() {
                   {index > 0 && <ChevronRight size={12} />}
                   <button
                     className="link-btn mono"
-                    onClick={() => { setFolder(crumb.path); setService(undefined); setVersion(undefined); }}
+                    onClick={() => guardInline(() => { setFolder(crumb.path); setService(undefined); setVersion(undefined); })}
                     aria-current={folder === crumb.path ? 'location' : undefined}
                   >
                     {index === 0 ? 'Root' : crumb.label}
@@ -848,10 +1106,23 @@ export function SecretsPage() {
                 </span>
               ))}
             </nav>
+            <div className="folder-filter">
+              <Search size={14} aria-hidden="true" />
+              <input
+                aria-label="Filter keys in this folder"
+                placeholder="Filter keys…"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                data-testid="folder-filter"
+              />
+              {filter && (
+                <button type="button" className="link-btn" onClick={() => setFilter('')}>Clear</button>
+              )}
+            </div>
             <div style={{ padding: 0 }}>
               {pathsQ.isLoading && <div className="state"><div className="spinner" /></div>}
               {pathsQ.isError && <ErrorState error={pathsQ.error} onRetry={() => void pathsQ.refetch()} />}
-              <FolderRows folder={tree} current={folder} depth={0} onSelect={(path) => { setFolder(path); setService(undefined); setVersion(undefined); }} />
+              <FolderRows folder={tree} current={folder} depth={0} onSelect={(path) => guardInline(() => { setFolder(path); setService(undefined); setVersion(undefined); })} />
               {!pathsQ.isLoading && tree.folders.length === 0 && (
                 <p className="small muted" style={{ padding: '0 var(--spacing-md)' }}>No folders in this project yet.</p>
               )}
@@ -860,7 +1131,9 @@ export function SecretsPage() {
                 Secrets in {folder || 'root'} ({filteredSecrets.length})
               </div>
               {!pathsQ.isLoading && filteredSecrets.length === 0 && (
-                <p className="small muted" style={{ padding: '0 var(--spacing-md)' }}>No secrets in this folder.</p>
+                <p className="small muted" style={{ padding: '0 var(--spacing-md)' }}>
+                  No secrets in this folder. Use <strong>New folder</strong> to create a path, or <strong>Import</strong> to add fields.
+                </p>
               )}
               {filteredSecrets.map((path) => {
                 const fields = fieldNamesByPath[path]?.length ?? 0;
@@ -868,7 +1141,7 @@ export function SecretsPage() {
                   <button
                     key={path}
                     className={`list-item ${service === path ? 'selected' : ''}`}
-                    onClick={() => { setService(path); setVersion(undefined); }}
+                    onClick={() => guardInline(() => { setService(path); setVersion(undefined); })}
                     data-testid={`secret-${path}`}
                   >
                     <Database size={16} />
@@ -924,11 +1197,12 @@ export function SecretsPage() {
                       size="small"
                       variant="outlined"
                       icon={<Plus size={15} />}
-                      onClick={() => void openAddField()}
-                      disabled={!canWriteMeta}
-                      title={canWriteMeta ? 'Add a key to this secret' : 'Your token cannot add keys here'}
+                      onClick={openAddFieldInline}
+                      disabled={!writable}
+                      data-testid="inline-add-field"
+                      title={writable ? 'Add a key to this secret' : 'Your token cannot add keys here'}
                     >
-                      Add secret
+                      Add key
                     </Button>
                     <Button
                       size="small"
@@ -1004,13 +1278,13 @@ export function SecretsPage() {
                     {crumbs.map((crumb) => (
                       <span key={crumb.path || 'root'} className="breadcrumbs__part">
                         <ChevronRight size={13} />
-                        <button className="link-btn mono" onClick={() => { setFolder(crumb.path); setService(undefined); }}>{crumb.label}</button>
+                        <button className="link-btn mono" onClick={() => guardInline(() => { setFolder(crumb.path); setService(undefined); })}>{crumb.label}</button>
                       </span>
                     ))}
                     {service && <><ChevronRight size={13} /><span className="mono strong">{secretName(service)}</span></>}
                   </nav>
                 )}
-                {!service && <p className="muted">Select a folder or secret from the left to see its fields.</p>}
+                {!service && <p className="muted">Pick a folder on the left, then choose a secret. <strong>New folder</strong> creates a new path; <strong>Import</strong> adds fields to a new secret.</p>}
                 {service && secretQ.data && !writable && caps && <div className="notice warning small">{deniedReason(caps, currentPath, 'update')}</div>}
                 {secretQ.isLoading && <div className="state"><div className="spinner" /></div>}
                 {secretNotFound && (
@@ -1027,7 +1301,7 @@ export function SecretsPage() {
                         {annotations.note && <span className="small muted"><MessageSquareText size={12} /> {annotations.note}</span>}
                       </div>
                     )}
-                    {fieldGroups.length === 0 && <EmptyState title="Empty secret">This secret has no fields yet.</EmptyState>}
+                    {fieldGroups.length === 0 && <EmptyState title="Empty secret">This secret has no fields yet. Use <strong>Add key</strong> above to add the first one.</EmptyState>}
                     {fieldGroups.map((group) => (
                       <details key={group.id} className="field-group" data-testid={`field-group-${group.id}`}>
                         <summary>
@@ -1037,6 +1311,7 @@ export function SecretsPage() {
                         <div className="field-group__fields">
                           {group.fields.map(([key, value]) => {
                             const refs = findReferences(String(value ?? ''));
+                            const index = inlineOrder.indexOf(key);
                             return (
                               <SecretField
                                 key={key}
@@ -1046,12 +1321,91 @@ export function SecretsPage() {
                                 override={Object.prototype.hasOwnProperty.call(myOverrides, key) ? myOverrides[key] : undefined}
                                 resolved={refs.length > 0 ? resolveReferences(String(value ?? ''), referenceLookup) : undefined}
                                 resetKey={resetKey}
+                                editable={writable && version === undefined}
+                                editing={inlineEditing === key}
+                                draftValue={inlineDraft[key]}
+                                removed={inlineDraft[key] === null}
+                                nextField={inlineOrder[index + 1]}
+                                onStartEdit={setInlineEditing}
+                                onStage={stageInline}
+                                onCancelEdit={() => setInlineEditing(null)}
+                                onRemove={removeInline}
+                                onUndoRemove={undoRemoveInline}
                               />
                             );
                           })}
                         </div>
                       </details>
                     ))}
+                    {Object.entries(inlineDraft)
+                      .filter(([key, value]) => value !== null && !Object.prototype.hasOwnProperty.call(inlineBase, key))
+                      .map(([key, value]) => (
+                        <SecretField
+                          key={`staged-${key}`}
+                          name={key}
+                          value=""
+                          staged
+                          resetKey={resetKey}
+                          editable={writable && version === undefined}
+                          editing={inlineEditing === key}
+                          draftValue={value}
+                          onStartEdit={setInlineEditing}
+                          onStage={stageInline}
+                          onCancelEdit={() => setInlineEditing(null)}
+                          onRemove={removeInline}
+                          onUndoRemove={undoRemoveInline}
+                        />
+                      ))}
+                    {inlineAddOpen && (
+                      <div className="inline-add" data-testid="inline-add-row">
+                        <input
+                          className="mono"
+                          aria-label="New key name"
+                          placeholder="KEY"
+                          autoFocus
+                          value={inlineAddKey}
+                          onChange={(event) => { setInlineAddKey(event.target.value); setInlineAddError(null); }}
+                          onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addInlineField(); } }}
+                        />
+                        <input
+                          className="mono"
+                          aria-label="New key value"
+                          placeholder="value"
+                          autoComplete="off"
+                          spellCheck={false}
+                          value={inlineAddValue}
+                          onChange={(event) => setInlineAddValue(event.target.value)}
+                          onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addInlineField(); } }}
+                        />
+                        <Button size="small" onClick={addInlineField}>Add</Button>
+                        <Button size="small" variant="ghost" onClick={() => { setInlineAddOpen(false); setInlineAddError(null); }}>Cancel</Button>
+                      </div>
+                    )}
+                    {inlineAddError && <p className="field__error" role="alert">{inlineAddError}</p>}
+                    {inlineDirty && (
+                      <div className="inline-change-bar" data-testid="inline-change-bar">
+                        <span>
+                          <strong>{inlineChanges.length} change{inlineChanges.length === 1 ? '' : 's'}</strong>
+                          <span className="small muted"> · staged, not saved</span>
+                        </span>
+                        <div className="inline-change-bar__actions">
+                          <Button size="small" variant="outlined" onClick={() => setInlineReview(true)} data-testid="inline-review">Review</Button>
+                          <Button size="small" variant="ghost" onClick={discardInline} data-testid="inline-discard">Discard</Button>
+                          <Button
+                            size="small"
+                            icon={<Lock size={14} />}
+                            onClick={() => void saveInline()}
+                            loading={savingInline}
+                            disabled={savingInline}
+                            data-testid="inline-save"
+                            title="Save only the changed keys with kv patch"
+                          >
+                            Save changes
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    {inlineError && <div className="notice error small" role="alert">{inlineError}</div>}
                     <div className="divider" />
                     <div className="meta-row">
                       <span>Version {secretQ.data.data.metadata.version}</span>
@@ -1174,6 +1528,95 @@ export function SecretsPage() {
           <div className="notice warning small">
             The destination is written with your current token. Your audit log records the write.
           </div>
+        </Dialog>
+      )}
+
+      {inlineReview && (
+        <Dialog
+          title="Review staged changes"
+          onClose={() => setInlineReview(false)}
+          footer={
+            <>
+              <Button variant="outlined" onClick={() => setInlineReview(false)}>Keep editing</Button>
+              <Button icon={<Lock size={15} />} onClick={() => { setInlineReview(false); void saveInline(); }} loading={savingInline}>
+                Save changes
+              </Button>
+            </>
+          }
+        >
+          <p className="small muted">
+            {inlineChanges.length} field{inlineChanges.length === 1 ? '' : 's'} will change. Values stay masked until you reveal them,
+            and nothing is written until you save. Removals need a full write; everything else is one <code>kv patch</code>.
+          </p>
+          <div className="review-list" data-testid="inline-review-list">
+            {inlineChanges.map(([key, value]) => {
+              const kind = value === null ? 'remove' : Object.prototype.hasOwnProperty.call(inlineBase, key) ? 'update' : 'new';
+              return (
+                <div className="review-row" key={key} data-testid={`review-${key}`}>
+                  <span className="mono strong">{key}</span>
+                  <Badge size="small" variant={kind === 'remove' ? 'danger' : kind === 'new' ? 'success' : 'warning'}>
+                    {kind === 'remove' ? 'removed' : kind}
+                  </Badge>
+                  {value === null
+                    ? <span className="small muted">Key will be deleted</span>
+                    : <ReviewValue value={value} />}
+                </div>
+              );
+            })}
+          </div>
+        </Dialog>
+      )}
+
+      {pendingInlineNav && (
+        <Dialog
+          title="Discard unsaved changes?"
+          onClose={() => setPendingInlineNav(null)}
+          footer={
+            <>
+              <Button variant="outlined" onClick={() => setPendingInlineNav(null)}>Keep editing</Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  const run = pendingInlineNav;
+                  setPendingInlineNav(null);
+                  discardInline();
+                  run();
+                }}
+              >
+                Discard and continue
+              </Button>
+            </>
+          }
+        >
+          <p className="small muted">
+            {inlineChanges.length} staged field change{inlineChanges.length === 1 ? '' : 's'} {inlineChanges.length === 1 ? 'has' : 'have'} not been written to OpenBao.
+            Moving to another secret, folder or environment discards them.
+          </p>
+        </Dialog>
+      )}
+
+      {blocker.status === 'blocked' && (
+        <Dialog
+          title="Leave this page with unsaved changes?"
+          onClose={() => blocker.reset?.()}
+          footer={
+            <>
+              <Button variant="outlined" onClick={() => blocker.reset?.()}>Stay on this page</Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  discardInline();
+                  blocker.proceed?.();
+                }}
+              >
+                Discard and leave
+              </Button>
+            </>
+          }
+        >
+          <p className="small muted">
+            {inlineChanges.length} staged field change{inlineChanges.length === 1 ? '' : 's'} will be lost.
+          </p>
         </Dialog>
       )}
 

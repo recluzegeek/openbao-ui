@@ -2,15 +2,21 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { AlertCircle, AlertTriangle, CheckCircle2, Info, X } from 'lucide-react';
 
 type ToastKind = 'success' | 'error' | 'warning' | 'info';
+interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 interface Toast {
   id: string;
   kind: ToastKind;
   title: string;
   message?: string;
+  action?: ToastAction;
 }
 
 interface ToastContextValue {
-  addToast: (kind: ToastKind, title: string, message?: string) => void;
+  addToast: (kind: ToastKind, title: string, message?: string, action?: ToastAction) => void;
   dismiss: (id: string) => void;
 }
 
@@ -31,10 +37,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addToast = useCallback(
-    (kind: ToastKind, title: string, message?: string) => {
+    (kind: ToastKind, title: string, message?: string, action?: ToastAction) => {
       const id = crypto.randomUUID();
-      setToasts((current) => [...current.slice(-3), { id, kind, title, message }]);
-      window.setTimeout(() => dismiss(id), 5000);
+      setToasts((current) => [...current.slice(-3), { id, kind, title, message, action }]);
+      window.setTimeout(() => dismiss(id), action ? 10_000 : 5000);
     },
     [dismiss],
   );
@@ -52,7 +58,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               <strong>{toast.title}</strong>
               {toast.message && <div className="small muted">{toast.message}</div>}
             </div>
-            <button className="icon-btn" onClick={() => dismiss(toast.id)} aria-label="Dismiss notification" style={{ marginLeft: 'auto' }}>
+            {toast.action && (
+              <button
+                className="link-btn"
+                style={{ marginLeft: 'auto', flex: 'none', fontWeight: 600 }}
+                onClick={() => {
+                  toast.action!.onClick();
+                  dismiss(toast.id);
+                }}
+              >
+                {toast.action.label}
+              </button>
+            )}
+            <button className="icon-btn" onClick={() => dismiss(toast.id)} aria-label="Dismiss notification" style={{ marginLeft: toast.action ? 0 : 'auto' }}>
               <X size={16} />
             </button>
           </div>

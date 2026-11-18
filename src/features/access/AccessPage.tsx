@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Bot, ClipboardCheck, Layers3, ShieldCheck } from 'lucide-react';
+import { Bot, ClipboardCheck, Layers3, ShieldCheck, Users } from 'lucide-react';
 import { bao } from '@/lib/api';
 import { can } from '@/lib/capabilities';
 import {
@@ -24,18 +24,23 @@ import {
 } from '@/lib/policy';
 import { useToast } from '@/lib/toast';
 import { ErrorState } from '@/components/common/Extras';
+import { Field } from '@/components/common/Field';
+import { FilterBar } from '@/components/common/FilterBar';
 import { RoleTemplates } from './RoleTemplates';
 import { PolicyBuilder } from './PolicyBuilder';
 import { AccessSimulator } from './AccessSimulator';
 import { MachineIdentities } from './MachineIdentities';
+import { TeamsPage } from './TeamsPage';
+import { EffectiveAccessCard } from './EffectiveAccessCard';
 
-type View = 'roles' | 'builder' | 'simulator' | 'identities';
+type View = 'roles' | 'builder' | 'simulator' | 'identities' | 'teams';
 
 const VIEWS: { id: View; label: string; icon: typeof ShieldCheck }[] = [
   { id: 'roles', label: 'Role templates', icon: ShieldCheck },
   { id: 'builder', label: 'Policy builder', icon: Layers3 },
   { id: 'simulator', label: 'Access simulator', icon: ClipboardCheck },
   { id: 'identities', label: 'Machine identities', icon: Bot },
+  { id: 'teams', label: 'Teams & people', icon: Users },
 ];
 
 export function AccessPage() {
@@ -115,23 +120,26 @@ export function AccessPage() {
         <div>
           <p>Design project-scoped roles, preview the HCL, and check what a user or machine can actually reach.</p>
         </div>
-        <div className="topbar__actions">
-          <label className="small muted" htmlFor="access-project">Project</label>
+      </div>
+
+      <FilterBar ariaLabel="Access scope" className="access-scope">
+        <Field label="Project" htmlFor="access-project" style={{ minWidth: 180 }}>
           <input
             id="access-project"
             className="mono"
             value={project}
             list="access-projects"
+            placeholder="Choose a project"
             onChange={(event) => {
               setProject(event.target.value);
               void navigate({ search: (prev) => ({ ...prev, project: event.target.value }), replace: true });
             }}
-            style={{ width: 140 }}
           />
           <datalist id="access-projects">
             {projectList.map((item) => <option value={item} key={item} />)}
           </datalist>
-          <label className="small muted" htmlFor="access-env">Environment</label>
+        </Field>
+        <Field label="Environment" htmlFor="access-env" style={{ minWidth: 160 }}>
           <select
             id="access-env"
             value={env}
@@ -143,8 +151,37 @@ export function AccessPage() {
             <option value="*">All environments</option>
             {envList.map((item) => <option value={item} key={item} />)}
           </select>
+        </Field>
+        <p className="small muted filter-bar__hint">
+          Role templates, the policy builder and the simulator use this scope.
+        </p>
+      </FilterBar>
+
+      <EffectiveAccessCard />
+
+      <details className="panel glossary" data-testid="access-glossary">
+        <summary className="panel__head" style={{ cursor: 'pointer' }}>
+          <ShieldCheck size={17} />
+          <h3>What do these terms mean?</h3>
+          <span className="small muted">Plain-language glossary</span>
+        </summary>
+        <div className="panel__body glossary__body">
+          <dl>
+            <dt>Policy (ACL)</dt>
+            <dd>A set of allow/deny rules for API paths. OpenBao checks a policy on every request.</dd>
+            <dt>HCL</dt>
+            <dd>The text format policies are written in. The builder generates it; you can also paste it.</dd>
+            <dt>Role template</dt>
+            <dd>A starting policy for a common job (viewer, contributor, admin) scoped to one project and environment.</dd>
+            <dt>Team</dt>
+            <dd>An identity group. Its members inherit the group's policies.</dd>
+            <dt>Machine identity</dt>
+            <dd>A non-human login such as an AppRole, used by CI jobs and services.</dd>
+            <dt>Simulator</dt>
+            <dd>Checks what a set of policies would allow, without changing anything.</dd>
+          </dl>
         </div>
-      </div>
+      </details>
 
       {policies.isError && <ErrorState error={policies.error} onRetry={() => void policies.refetch()} />}
       {!canListPolicies && caps && (
@@ -213,6 +250,9 @@ export function AccessPage() {
           policies={policyNames}
           authMethods={authMethods.data ?? []}
         />
+      )}
+      {view === 'teams' && (
+        <TeamsPage project={project} projects={projectList} />
       )}
     </div>
   );

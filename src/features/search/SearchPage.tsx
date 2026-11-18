@@ -1,21 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
-import { useQueries } from '@tanstack/react-query';
-import { Clock3, Database, Search, Star } from 'lucide-react';
-import { bao } from '@/lib/api';
-import { secretApiPath } from '@/lib/baoPaths';
+import { useQuery } from '@tanstack/react-query';
+import { Clock3, Database, RefreshCw, Search, Star } from 'lucide-react';
 import { formatWhen } from '@/lib/format';
 import { folderOf, isFavorite, loadFavorites, loadRecent, toggleFavorite, type SecretRef } from '@/lib/navigationMemory';
-import { fetchLayoutDiscovery, useProjects } from '@/lib/queries';
+import { useProjects } from '@/lib/queries';
+import { buildSearchIndex, type IndexedSecret } from '@/lib/searchIndex';
+import { matchesSearch, uniqueBy } from '@/lib/searchMatch';
 import { Badge } from '@/components/common/Badge';
-import { EmptyState, EnvBadge } from '@/components/common/Extras';
+import { Button } from '@/components/common/Button';
+import { EmptyState, EnvBadge, ErrorState } from '@/components/common/Extras';
 
 interface Hit extends Omit<SecretRef, 'visitedAt'> {
   title: string;
   detail: string;
 }
 
-const MAX_SECRETS = 80;
+const INDEX_STALE_MS = 5 * 60_000;
 
 export function SearchPage() {
   const navigate = useNavigate({ from: '/search' });
@@ -25,34 +26,18 @@ export function SearchPage() {
 
   useEffect(() => setInput(search.q ?? ''), [search.q]);
 
-  // Use the same discovery/resolver as the Secrets page. Probing `<project>/env/`
-  // directly produced 22 404s and indexed only one layout on this server.
-  const discoveryQueries = useQueries({
-    queries: (projects.data ?? []).map((project) => ({
-      queryKey: ['layout-discovery', project],
-      queryFn: () => fetchLayoutDiscovery(project),
-      retry: false,
-      staleTime: 120_000,
-    })),
+  // Paths and field names are cached for five minutes. The refresh button asks
+  // the index to revalidate; unchanged secrets are skipped via KV metadata.
+  const index = useQuery({
+    queryKey: ['search-index', (projects.data ?? []).join('\0')],
+    queryFn: () => buildSearchIndex(projects.data ?? []),
+    enabled: Boolean(projects.data?.length),
+    staleTime: INDEX_STALE_MS,
+    gcTime: 30 * 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
   });
-  const pairs = (projects.data ?? []).flatMap((project, index) => {
-    const seen = new Set<string>();
-    return (discoveryQueries[index]?.data?.classified ?? []).flatMap((secret) => {
-      const key = `${secret.env}\0${secret.logical}`;
-      if (!secret.logical || seen.has(key)) return [];
-      seen.add(key);
-      return [{ project, env: secret.env, path: secret.logical }];
-    });
-  });
-  const targets = pairs.slice(0, MAX_SECRETS);
-  const secretQueries = useQueries({
-    queries: targets.map(({ project, env, path }) => ({
-      queryKey: ['secret', project, env, path, 'search'],
-      queryFn: () => bao.readSecret(secretApiPath(project, env, path)),
-      retry: false,
-      staleTime: 30_000,
-    })),
-  });
+  const indexed = useMemo(() => index.data?.secrets ?? [], [index.data]);
 
   const [favorites, setFavorites] = useState<SecretRef[]>(() => loadFavorites());
   // Recents can outlive a project (test projects get removed). Drop entries
@@ -62,20 +47,32 @@ export function SearchPage() {
     () => loadRecent().filter((ref) => !projects.data || projectNames.has(ref.project)),
     [input, projects.data, projectNames],
   );
-  const allHits = useMemo<Hit[]>(() => targets.flatMap((target, index) => {
-    const fields = Object.keys(secretQueries[index]?.data?.data.data ?? {});
-    const self: Hit = { ...target, title: target.path, detail: `${fields.length} fields` };
-    const fieldHits: Hit[] = fields.map((key) => ({ ...target, key, title: key, detail: `${target.project}/${target.env}/${target.path}` }));
-    return [self, ...fieldHits];
-  }), [targets.map((target) => `${target.project}/${target.env}/${target.path}`).join('|'), secretQueries]);
 
-  const query = input.trim().toLowerCase();
+  const allHits = useMemo<Hit[]>(() => indexed.flatMap((target: IndexedSecret) => {
+    const self: Hit = { ...target, title: target.path, detail: `${target.fields.length} fields` };
+    const fieldHits: Hit[] = target.fields.map((key) => ({
+      ...target,
+      key,
+      title: key,
+      detail: `${target.project}/${target.env}/${target.path}`,
+    }));
+    return [self, ...fieldHits];
+  }), [indexed]);
+
+  const query = input.trim();
   const results = query
-    ? allHits.filter((hit) => [hit.title, hit.project, hit.env, hit.path, hit.key ?? ''].join(' ').toLowerCase().includes(query)).slice(0, 60)
+    ? allHits
+      .filter((hit) => matchesSearch([hit.title, hit.project, hit.env, hit.path, hit.key], query))
+      .slice(0, 60)
     : allHits.filter((hit) => !hit.key).slice(0, 20);
-  const isLoading = projects.isLoading
-    || discoveryQueries.some((q) => q.isLoading)
-    || secretQueries.some((q) => q.isLoading);
+  const isLoading = projects.isLoading || index.isLoading;
+  const isRefreshing = index.isFetching && !index.isLoading;
+
+  // A favorite/recents row and an index row can describe the same secret.
+  const uniqueRecent = useMemo(
+    () => uniqueBy(recent, (ref) => `${ref.project}/${ref.env}/${ref.path}/${ref.key ?? ''}`),
+    [recent],
+  );
 
   function onFavorite(hit: Omit<SecretRef, 'visitedAt'>) {
     setFavorites(toggleFavorite({
@@ -123,6 +120,19 @@ export function SearchPage() {
         <div>
           <p>Find a secret or field by name across every project and environment you can read.</p>
         </div>
+        <div className="topbar__actions">
+          <Button
+            size="small"
+            variant="outlined"
+            data-testid="search-refresh"
+            icon={<RefreshCw size={14} className={isRefreshing ? 'spin' : ''} />}
+            onClick={() => void index.refetch()}
+            disabled={isRefreshing || !projects.data?.length}
+            title="Revalidate paths and field names. Unchanged secrets are not re-read."
+          >
+            {isRefreshing ? 'Refreshing…' : 'Refresh index'}
+          </Button>
+        </div>
       </div>
 
       <div className="search search--large">
@@ -140,12 +150,18 @@ export function SearchPage() {
       </div>
 
       {isLoading && <div className="state" data-testid="search-loading"><div className="spinner" /><p>Indexing readable secrets…</p></div>}
+      {index.isError && <ErrorState error={index.error} onRetry={() => void index.refetch()} />}
 
-      {query && (
+      {query && !isLoading && (
         <div className="panel" data-testid="search-results">
-          <div className="panel__head"><Search size={17} /><h3>Results</h3><Badge size="small">{results.length}</Badge></div>
+          <div className="panel__head">
+            <Search size={17} />
+            <h3>Results</h3>
+            <Badge size="small">{results.length}</Badge>
+            {isRefreshing && <span className="small muted">refreshing…</span>}
+          </div>
           <div className="panel__body">
-            {results.length === 0 && !isLoading && <EmptyState title="No matches">Try a field name, a folder, or a project name.</EmptyState>}
+            {results.length === 0 && <EmptyState title="No matches">Try a field name, a folder, or a project name.</EmptyState>}
             {results.map((hit) => renderHit(hit))}
           </div>
         </div>
@@ -156,8 +172,8 @@ export function SearchPage() {
           <div className="panel">
             <div className="panel__head"><Clock3 size={17} /><h3>Recent secrets</h3></div>
             <div className="panel__body">
-              {recent.length === 0 && <p className="muted">Open a secret to see it here. Only paths are remembered.</p>}
-              {recent.map((ref) => renderHit({ ...ref, title: ref.path, detail: ref.key ? `field ${ref.key}` : `visited ${formatWhen(new Date(ref.visitedAt).toISOString())}` }))}
+              {uniqueRecent.length === 0 && <p className="muted">Open a secret to see it here. Only paths are remembered.</p>}
+              {uniqueRecent.map((ref) => renderHit({ ...ref, title: ref.path, detail: ref.key ? `field ${ref.key}` : `visited ${formatWhen(new Date(ref.visitedAt).toISOString())}` }))}
             </div>
           </div>
           <div className="panel">
@@ -178,8 +194,9 @@ export function SearchPage() {
       )}
 
       <p className="small muted" data-testid="search-index-note">
-        Field names require a temporary KV read of each secret; values are not displayed, logged or persisted.
-        {targets.length >= MAX_SECRETS && ` Showing the first ${MAX_SECRETS} secrets.`}
+        Field names come from a temporary KV read of each secret; values are never displayed, logged or persisted.
+        {index.data && ` Indexed ${index.data.secrets.length} of ${index.data.total} readable secrets · updated ${formatWhen(new Date(index.data.indexedAt).toISOString())}.`}
+        {index.data?.truncated && ` Showing the first ${index.data.secrets.length} secrets.`}
       </p>
     </div>
   );

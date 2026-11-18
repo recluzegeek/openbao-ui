@@ -81,6 +81,16 @@ export function isComponentSegment(segment: string): boolean {
   return matchesToken(segment, REPO_TOKENS) || segment.toLowerCase() === 'env';
 }
 
+/**
+ * `ph_scope_tabs` is ambiguous across exporters: some store the environment
+ * there, others store the component/repo (e.g. `mfe-roomsss-account`). Treat a
+ * metadata value as the environment only when it looks like one, or when the
+ * path has no environment-like segment to contradict it.
+ */
+export function metadataEnvIsEnvironment(metaEnv: string, pathEnv?: string): boolean {
+  return isEnvironmentSegment(metaEnv) || !pathEnv;
+}
+
 /** Servers often store these labels as a one-element JSON array, e.g. `["development"]`. */
 function normalizeMetadataValue(raw: string): string {
   const trimmed = raw.trim();
@@ -170,6 +180,19 @@ export function inferLayout(
     if (metaProject && metaEnv) {
       // Metadata is authoritative for labels; physical segments still give the logical path.
       const pathEnv = seg.find(isEnvironmentSegment);
+      if (!metadataEnvIsEnvironment(metaEnv, pathEnv) && pathEnv) {
+        // `ph_scope_tabs` holds the repo/component for this project, so the
+        // path's environment segment is the real one.
+        classified.push({
+          physical: path,
+          project: metaProject,
+          env: pathEnv,
+          logical: logicalForMetadata(profile, seg, pathEnv),
+          component: metaEnv,
+          source: 'metadata',
+        });
+        continue;
+      }
       if (pathEnv && pathEnv.toLowerCase() !== metaEnv.toLowerCase()) {
         const reason = `Metadata environment "${metaEnv}" disagrees with path segment "${pathEnv}" in "${path}"; using the metadata value.`;
         warnLayout(reason, warnings);

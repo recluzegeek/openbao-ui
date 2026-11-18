@@ -210,6 +210,8 @@ export interface KVMetadataResponse {
   data: {
     current_version: number;
     oldest_version?: number;
+    /** Last write time for the key, used to skip unchanged search payloads. */
+    updated_time?: string;
     /** 0 means "use the mount default" (normally 10 versions). */
     max_versions?: number;
     cas_required?: boolean;
@@ -277,6 +279,25 @@ export interface EntitySummary {
   name: string;
   id?: string;
   policies: string[];
+  aliases?: Array<{ name: string; mountType?: string; mountAccessor?: string }>;
+}
+
+/** An internal or external identity group, used for teams. */
+export interface IdentityGroup {
+  id: string;
+  name: string;
+  type: 'internal' | 'external';
+  policies: string[];
+  memberEntityIds: string[];
+  metadata?: Record<string, string>;
+}
+
+/** A userpass user. The API never returns the password. */
+export interface UserpassUser {
+  username: string;
+  policies: string[];
+  tokenTtl?: number;
+  tokenMaxTtl?: number;
 }
 
 export interface TotpKeyResponse {
@@ -578,11 +599,114 @@ export const bao = {
     return cleanKeys(res.data?.keys);
   },
   readEntity: async (name: string): Promise<EntitySummary> => {
-    const res = await request<{ data?: { name?: string; policies?: string[] } }>(
-      `identity/entity/name/${encodeURIComponent(name)}`,
-    );
-    return { name: res.data?.name ?? name, policies: cleanKeys(res.data?.policies) };
+    const res = await request<{
+      data?: {
+        id?: string;
+        name?: string;
+        policies?: string[];
+        aliases?: Array<{ name?: string; mount_type?: string; mount_accessor?: string }>;
+      };
+    }>(`identity/entity/name/${encodeURIComponent(name)}`);
+    return {
+      name: res.data?.name ?? name,
+      id: res.data?.id,
+      policies: cleanKeys(res.data?.policies),
+      aliases: (res.data?.aliases ?? []).map((alias) => ({
+        name: alias.name ?? '',
+        mountType: alias.mount_type,
+        mountAccessor: alias.mount_accessor,
+      })),
+    };
   },
+
+  /** Teams are identity groups. Names are the stable, readable handle. */
+  listGroups: async () => {
+    const res = await bao.list('identity/group/name');
+    return cleanKeys(res.data?.keys);
+  },
+  readGroup: async (name: string): Promise<IdentityGroup> => {
+    const res = await request<{
+      data?: {
+        id?: string;
+        name?: string;
+        type?: string;
+        policies?: string[];
+        member_entity_ids?: string[];
+        metadata?: Record<string, string>;
+      };
+    }>(`identity/group/name/${encodeURIComponent(name)}`);
+    return {
+      id: res.data?.id ?? '',
+      name: res.data?.name ?? name,
+      type: res.data?.type === 'external' ? 'external' : 'internal',
+      policies: cleanKeys(res.data?.policies),
+      memberEntityIds: cleanKeys(res.data?.member_entity_ids),
+      metadata: res.data?.metadata,
+    };
+  },
+  /** Resolve a member entity id to its name and aliases. */
+  readEntityById: async (id: string): Promise<EntitySummary> => {
+    const res = await request<{
+      data?: {
+        id?: string;
+        name?: string;
+        policies?: string[];
+        aliases?: Array<{ name?: string; mount_type?: string; mount_accessor?: string }>;
+      };
+    }>(`identity/entity/id/${encodeURIComponent(id)}`);
+    return {
+      name: res.data?.name ?? id,
+      id: res.data?.id ?? id,
+      policies: cleanKeys(res.data?.policies),
+      aliases: (res.data?.aliases ?? []).map((alias) => ({
+        name: alias.name ?? '',
+        mountType: alias.mount_type,
+        mountAccessor: alias.mount_accessor,
+      })),
+    };
+  },
+  /** Update a group's policies and members. The name is the identity. */
+  writeGroup: (group: {
+    name: string;
+    type?: 'internal' | 'external';
+    policies: string[];
+    memberEntityIds: string[];
+  }) =>
+    request<void>(`identity/group/name/${encodeURIComponent(group.name)}`, {
+      method: 'POST',
+      data: {
+        name: group.name,
+        type: group.type ?? 'internal',
+        policies: group.policies,
+        member_entity_ids: group.memberEntityIds,
+      },
+    }),
+  listUserpassUsers: async (mount = 'userpass') => {
+    const res = await bao.list(`auth/${encodeURIComponent(mount)}/users`);
+    return cleanKeys(res.data?.keys);
+  },
+  readUserpassUser: async (username: string, mount = 'userpass'): Promise<UserpassUser> => {
+    const res = await request<{
+      data?: { policies?: string[]; token_ttl?: number; token_max_ttl?: number };
+    }>(`auth/${encodeURIComponent(mount)}/users/${encodeURIComponent(username)}`);
+    return {
+      username,
+      policies: cleanKeys(res.data?.policies),
+      tokenTtl: res.data?.token_ttl,
+      tokenMaxTtl: res.data?.token_max_ttl,
+    };
+  },
+  /** Create or update a userpass user. The password is shown once and never stored. */
+  writeUserpassUser: (
+    username: string,
+    password: string,
+    policies: string[],
+    mount = 'userpass',
+  ) =>
+    request<void>(`auth/${encodeURIComponent(mount)}/users/${encodeURIComponent(username)}`, {
+      method: 'POST',
+      data: { password, token_policies: policies },
+    }),
   listAuthMethods: async (): Promise<AuthMethodSummary[]> => {
     const res = await request<{ data?: Record<string, { type?: string; accessor?: string }> }>('sys/auth');
     return Object.entries(res.data ?? {}).map(([path, config]) => ({

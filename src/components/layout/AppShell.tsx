@@ -12,14 +12,14 @@ import { CommandPalette } from './CommandPalette';
 import { ShortcutsDialog } from './ShortcutsDialog';
 
 const links = [
-  { to: '/welcome' as const, label: 'Getting started', icon: Compass },
-  { to: '/secrets' as const, label: 'Secrets', icon: KeyRound },
-  { to: '/trash' as const, label: 'Trash', icon: Trash2 },
-  { to: '/runbooks' as const, label: 'Runbooks', icon: BookOpen },
-  { to: '/codes' as const, label: 'One-time codes', icon: ShieldCheck },
-  { to: '/access' as const, label: 'Access control', icon: Shield },
-  { to: '/audit' as const, label: 'Audit log', icon: Activity },
-  { to: '/automation' as const, label: 'For agents', icon: TerminalSquare },
+  { to: '/welcome' as const, label: 'Getting started', icon: Compass, hint: 'Set up this OpenBao server' },
+  { to: '/secrets' as const, label: 'Secrets', icon: KeyRound, hint: 'Browse folders, environments and secret values' },
+  { to: '/trash' as const, label: 'Trash', icon: Trash2, hint: 'Recover or permanently delete removed versions' },
+  { to: '/runbooks' as const, label: 'Runbooks', icon: BookOpen, hint: 'Project notes and operational steps' },
+  { to: '/codes' as const, label: 'One-time codes', icon: ShieldCheck, hint: 'Two-factor (TOTP) codes' },
+  { to: '/access' as const, label: 'Access control', icon: Shield, hint: 'Teams, roles, policies and who can do what' },
+  { to: '/audit' as const, label: 'Audit log', icon: Activity, hint: 'Who changed what, where and when' },
+  { to: '/automation' as const, label: 'For agents', icon: TerminalSquare, hint: 'Command snippets and machine identities' },
 ];
 
 export function AppShell() {
@@ -154,8 +154,8 @@ export function AppShell() {
 
         <nav className="nav-group" aria-label="Workspace">
           <div className="nav-group__label">Workspace</div>
-          {visibleLinks.map(({ to, label, icon: Icon }) => (
-            <Link key={to} to={to} data-testid={`nav-${to.slice(1)}`} className={`nav-link ${pathname === to ? 'active' : ''}`} aria-current={pathname === to ? 'page' : undefined}>
+          {visibleLinks.map(({ to, label, icon: Icon, hint }) => (
+            <Link key={to} to={to} title={hint} data-testid={`nav-${to.slice(1)}`} className={`nav-link ${pathname === to ? 'active' : ''}`} aria-current={pathname === to ? 'page' : undefined}>
               <Icon size={18} />
               <span>{label}</span>
             </Link>
@@ -225,8 +225,8 @@ export function AppShell() {
             >
               <Keyboard size={17} />
             </button>
-            <form className="namespace-control" onSubmit={applyNamespace} title={namespaceError ?? 'Namespace changes are applied only when you click Apply'}>
-              <label className="small muted" htmlFor="namespace">Namespace</label>
+            <form className="namespace-control" onSubmit={applyNamespace} title={namespaceError ?? 'A namespace is a tenant-like partition. Leave empty for the root namespace; changes apply only when you click Apply.'}>
+              <label className="small muted" htmlFor="namespace" title="A namespace isolates policies, secrets and auth behind one path.">Namespace</label>
               <input
                 id="namespace"
                 aria-label="OpenBao namespace"

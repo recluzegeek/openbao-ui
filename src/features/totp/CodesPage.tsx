@@ -5,6 +5,7 @@ import { bao, type CapabilitiesMap } from '@/lib/api';
 import { can, deniedReason } from '@/lib/capabilities';
 import { parseTotpAccount, totpCodePath, totpKeyPath } from '@/lib/baoPaths';
 import { parsePeriod, secondsUntil } from '@/lib/format';
+import { matchesSearch } from '@/lib/searchMatch';
 import { totpCapabilityPaths, useCapabilities, useProjects, useTotpAccounts, useTotpCode, useTotpKey } from '@/lib/queries';
 import { useToast } from '@/lib/toast';
 import { Badge } from '@/components/common/Badge';
@@ -137,11 +138,10 @@ export function CodesPage() {
   }
 
   const visible = useMemo(() => {
-    const needle = filter.toLowerCase();
     return allAccounts
       .filter((account) => {
         const parsed = parseTotpAccount(account);
-        return [account, parsed.account, parsed.project, issuer].some((value) => value.toLowerCase().includes(needle));
+        return matchesSearch([account, parsed.account, parsed.project, issuer], filter);
       })
       .sort((a, b) => {
         const pa = parseTotpAccount(a);

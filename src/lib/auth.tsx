@@ -26,6 +26,8 @@ interface AuthContextValue {
   setNamespace: (namespace: string) => void;
   /** Extend the current token lease and refresh its expiry. */
   renew: (increment?: string | number) => Promise<void>;
+  /** Re-read lookup-self and resultant-acl without changing the session. */
+  refresh: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -160,6 +162,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await refreshIdentity({ preserveOnError: true });
   }, [refreshIdentity]);
 
+  const refresh = useCallback(async () => {
+    await refreshIdentity({ preserveOnError: true });
+  }, [refreshIdentity]);
+
   const logout = useCallback(async () => {
     try {
       await bao.logout();
@@ -186,9 +192,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAddress,
       setNamespace,
       renew,
+      refresh,
       logout,
     }),
-    [status, identity, effectivePolicies, address, namespace, error, loginWithToken, loginWithUserpass, setAddress, setNamespace, renew, logout],
+    [status, identity, effectivePolicies, address, namespace, error, loginWithToken, loginWithUserpass, setAddress, setNamespace, renew, refresh, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

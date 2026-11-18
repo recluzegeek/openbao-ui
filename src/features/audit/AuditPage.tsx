@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
-import { Activity, RefreshCw, Search, ShieldCheck, ShieldX } from 'lucide-react';
+import { Activity, RefreshCw, ShieldCheck, ShieldX } from 'lucide-react';
 import {
   AUDIT_RANGES,
   actorLabel,
@@ -15,6 +15,8 @@ import { formatWhen } from '@/lib/format';
 import { useAuditLog } from '@/lib/queries';
 import { Badge } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
+import { Field } from '@/components/common/Field';
+import { FilterBar } from '@/components/common/FilterBar';
 import { CopyButton, EmptyState, ErrorState } from '@/components/common/Extras';
 
 type AuditSearch = {
@@ -84,51 +86,56 @@ export function AuditPage() {
       </div>
 
       {audit.data?.available !== false && (
-        <div className="control-bar audit-filters" role="search" aria-label="Audit log filters">
-        <div className="search search--large">
-          <Search size={16} />
-          <input
-            id="audit-search"
-            data-testid="audit-search"
-            value={filters.search}
-            onChange={(event) => setFilter('q', event.target.value || undefined)}
-            placeholder="Search path, actor, action or policy…"
-            aria-label="Search audit log"
-          />
-        </div>
-        <label className="small muted" htmlFor="audit-actor">Actor</label>
-        <select
-          id="audit-actor"
-          data-testid="audit-actor"
-          value={filters.actor}
-          onChange={(event) => setFilter('actor', event.target.value === 'all' ? undefined : event.target.value)}
+        <FilterBar
+          ariaLabel="Audit log filters"
+          className="audit-filters"
+          search={{
+            value: filters.search,
+            onChange: (value) => setFilter('q', value || undefined),
+            placeholder: 'Search path, actor, action or policy…',
+            label: 'Search audit log',
+            testId: 'audit-search',
+          }}
+          active={[
+            ...(filters.actor !== 'all' ? [{ label: `Actor: ${filters.actor}`, onClear: () => setFilter('actor', undefined) }] : []),
+            ...(filters.operation !== 'all' ? [{ label: `Action: ${operationLabel(filters.operation)}`, onClear: () => setFilter('operation', undefined) }] : []),
+            ...(filters.range !== 'all' ? [{ label: `Time: ${AUDIT_RANGES.find((range) => range.id === filters.range)?.label ?? filters.range}`, onClear: () => setFilter('range', undefined) }] : []),
+          ]}
+          onClearAll={() => void navigate({ search: EMPTY_SEARCH, replace: true })}
         >
-          <option value="all">All actors</option>
-          {actors.map((actor) => <option value={actor} key={actor}>{actor}</option>)}
-        </select>
-        <label className="small muted" htmlFor="audit-operation">Action</label>
-        <select
-          id="audit-operation"
-          data-testid="audit-operation"
-          value={filters.operation}
-          onChange={(event) => setFilter('operation', event.target.value === 'all' ? undefined : event.target.value)}
-        >
-          <option value="all">All actions</option>
-          {operations.map((operation) => <option value={operation} key={operation}>{operationLabel(operation)}</option>)}
-        </select>
-        <label className="small muted" htmlFor="audit-range">Time</label>
-        <select
-          id="audit-range"
-          data-testid="audit-range"
-          value={filters.range}
-          onChange={(event) => setFilter('range', event.target.value === 'all' ? undefined : event.target.value)}
-        >
-          {AUDIT_RANGES.map((range) => <option value={range.id} key={range.id}>{range.label}</option>)}
-        </select>
-        {(filters.search || filters.actor !== 'all' || filters.operation !== 'all' || filters.range !== 'all') && (
-          <Button size="small" variant="ghost" onClick={() => void navigate({ search: EMPTY_SEARCH, replace: true })}>Clear</Button>
-        )}
-        </div>
+          <Field label="Actor" htmlFor="audit-actor">
+            <select
+              id="audit-actor"
+              data-testid="audit-actor"
+              value={filters.actor}
+              onChange={(event) => setFilter('actor', event.target.value === 'all' ? undefined : event.target.value)}
+            >
+              <option value="all">All actors</option>
+              {actors.map((actor) => <option value={actor} key={actor}>{actor}</option>)}
+            </select>
+          </Field>
+          <Field label="Action" htmlFor="audit-operation">
+            <select
+              id="audit-operation"
+              data-testid="audit-operation"
+              value={filters.operation}
+              onChange={(event) => setFilter('operation', event.target.value === 'all' ? undefined : event.target.value)}
+            >
+              <option value="all">All actions</option>
+              {operations.map((operation) => <option value={operation} key={operation}>{operationLabel(operation)}</option>)}
+            </select>
+          </Field>
+          <Field label="Time" htmlFor="audit-range">
+            <select
+              id="audit-range"
+              data-testid="audit-range"
+              value={filters.range}
+              onChange={(event) => setFilter('range', event.target.value === 'all' ? undefined : event.target.value)}
+            >
+              {AUDIT_RANGES.map((range) => <option value={range.id} key={range.id}>{range.label}</option>)}
+            </select>
+          </Field>
+        </FilterBar>
       )}
 
       {audit.isError && <ErrorState error={audit.error} onRetry={() => void audit.refetch()} />}
