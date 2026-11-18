@@ -63,12 +63,30 @@ export function clearBaoSession(): void {
   s?.removeItem(KEYS.namespace);
 }
 
+/**
+ * Namespaces are path-like identifiers. Normalize what the user typed and
+ * reject path traversal so an accidental keystroke cannot silently change
+ * every request to a different namespace.
+ */
+export function normalizeNamespace(value: string): string {
+  const trimmed = value.trim().replace(/^\/+|\/+$/g, '');
+  if (!trimmed) return '';
+  const parts = trimmed.split('/');
+  if (parts.some((part) => !/^[A-Za-z0-9._-]+$/.test(part) || part === '.' || part === '..')) {
+    throw new Error('Use letters, numbers, dot, dash or slash between namespace names.');
+  }
+  if (parts.some((part) => part.startsWith('.'))) {
+    throw new Error('Namespace names cannot start with a dot.');
+  }
+  return trimmed;
+}
+
 export function isAuthenticated(): boolean {
   return Boolean(getBaoConfig().token);
 }
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   data?: unknown;
   list?: boolean;
   params?: Record<string, string>;
@@ -120,6 +138,9 @@ export async function request<T>(apiPath: string, options: RequestOptions = {}):
   }
 
   if (!response.ok) {
+    // OpenBao returns 404 for an empty LIST. That is "no keys", not a failure
+    // or a permission problem, and callers already handle `data: null`.
+    if (options.list && response.status === 404) return { data: null } as T;
     const errors = (body as { errors?: string[] } | null)?.errors;
     const detail = errors?.length ? errors.join('; ') : response.statusText;
     throw new BaoError(detail || `Request failed (${response.status})`, response.status, apiPath);
@@ -191,6 +212,11 @@ export interface AclPolicyResponse {
   data: { name?: string; policy: string };
 }
 
+/** Effective policies, including those inherited from identity groups. */
+export interface ResultantAclResponse {
+  data: { policies?: string[] };
+}
+
 export interface AuthMethodSummary {
   path: string;
   type: string;
@@ -236,6 +262,7 @@ export const bao = {
   unseal: (key: string) => request<SealStatusResponse>('sys/unseal', { method: 'PUT', data: { key }, unauthenticated: true }),
 
   lookupSelf: () => request<LookupSelfResponse>('auth/token/lookup-self'),
+  resultantAcl: () => request<ResultantAclResponse>('sys/internal/ui/resultant-acl'),
   capabilities: (paths: string[]) =>
     request<{ data: CapabilitiesMap }>('sys/capabilities-self', { method: 'POST', data: { paths } }),
   loginUserpass: (username: string, password: string, mount = 'userpass') =>
@@ -247,6 +274,16 @@ export const bao = {
   logout: () => request<void>('auth/token/revoke-self', { method: 'POST' }),
 
   list: (path: string) => request<ListResponse>(path, { list: true }),
+
+  /** Best-effort namespace picker. A 403 means the token cannot enumerate them. */
+  listNamespaces: async (): Promise<string[]> => {
+    try {
+      const res = await request<ListResponse>('sys/namespaces', { list: true });
+      return cleanKeys(res.data?.keys).map((key) => key.replace(/\/$/, ''));
+    } catch {
+      return [];
+    }
+  },
 
   /**
    * Generic recursive KV listing — the same walk `bao kv list -recursive` does.
@@ -433,12 +470,20 @@ export const bao = {
     }
   },
 
-  /** Dev-only local audit view; this endpoint is served by the Vite middleware, not OpenBao. */
+  /**
+   * Audit is a pluggable read-only provider, never a source of secret values.
+   * The dev server ships a local-bridge provider; deployments can point
+   * VITE_AUDIT_ENDPOINT at their own log reader. Unavailable is a normal result.
+   */
   auditTrail: async (path = '', limit = 10): Promise<AuditResponse> => {
+    const endpoint = import.meta.env.VITE_AUDIT_ENDPOINT || '/api/audit';
     const query = new URLSearchParams({ path, limit: String(limit) });
-    const response = await fetch(`/api/audit?${query}`, { headers: { Accept: 'application/json' } });
-    const body = await response.json().catch(() => ({})) as Partial<AuditResponse> & { error?: string };
-    if (!response.ok) throw new Error(body.error || `Audit request failed (${response.status})`);
-    return { available: true, entries: Array.isArray(body.entries) ? body.entries : [] };
+    const response = await fetch(`${endpoint}?${query}`, { headers: { Accept: 'application/json' } });
+    if (!response.ok) throw new Error('Audit log is not available in this deployment.');
+    const body = await response.json().catch(() => ({})) as Partial<AuditResponse>;
+    return {
+      available: body.available !== false,
+      entries: Array.isArray(body.entries) ? body.entries : [],
+    };
   },
 };

@@ -4,7 +4,8 @@ import { envRank, parseTotpAccount, secretPath, totpCodePath } from './baoPaths'
 import { envFile, formatTtl, parsePeriod, secondsUntil, shellQuote, tokenTtlLabel } from './format';
 import { baoCliSnippet, curlSnippet } from './snippets';
 import { dataFromRows, rowsFromData, validSecretName, validateRows } from './secretForm';
-import { bao } from './api';
+import { bao, normalizeNamespace, request, setBaoConfig } from './api';
+import { mergeEffectivePolicies } from './auth';
 import { capabilityPathsForFolder, capabilityPathsForSecret, environmentCreationTarget } from './queries';
 import { environmentMarkerPath, inferLayout, physicalPath } from './layout';
 import { clearProjectLayouts, registerProjectLayout, resolveApiPath, resolveEnvMetadataPath, toLogicalPath } from './layoutResolver';
@@ -520,5 +521,33 @@ describe('server-driven layout discovery', () => {
     expect(paths).toContain('kv/metadata/tgc/identity-service/development/database/');
     expect(paths).toContain('kv/data/tgc/identity-service/development/database/__new__');
     expect(paths).toContain('kv/metadata/tgc/');
+  });
+});
+
+describe('session hardening', () => {
+  it('normalizes namespaces and rejects traversal', () => {
+    expect(normalizeNamespace('  /team-a/  ')).toBe('team-a');
+    expect(normalizeNamespace('team-a/child')).toBe('team-a/child');
+    expect(normalizeNamespace('')).toBe('');
+    expect(() => normalizeNamespace('../root')).toThrow(/letters, numbers/i);
+    expect(() => normalizeNamespace('team a')).toThrow(/letters, numbers/i);
+  });
+
+  it('merges effective policies from resultant-acl', () => {
+    expect(mergeEffectivePolicies(['default'], ['default', 'org-admin'])).toEqual({
+      policies: ['default', 'org-admin'], effective: true,
+    });
+    expect(mergeEffectivePolicies(['default'], undefined)).toEqual({ policies: ['default'], effective: false });
+  });
+
+  it('treats an empty LIST 404 as no keys', async () => {
+    setBaoConfig({ token: 'test-token' });
+    const fetchStub = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: async () => '{"errors":[]}',
+    } as unknown as Response);
+    expect(await request('kv/metadata/empty/', { list: true })).toEqual({ data: null });
+    expect(fetchStub).toHaveBeenCalled();
   });
 });

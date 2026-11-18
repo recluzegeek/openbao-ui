@@ -15,6 +15,8 @@ type Identity = LookupSelfResponse['data'];
 interface AuthContextValue {
   status: Status;
   identity: Identity | null;
+  /** True when policies came from resultant-acl, including group policies. */
+  effectivePolicies: boolean;
   address: string;
   namespace: string;
   error: string | null;
@@ -32,33 +34,70 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : 'Sign-in failed';
 }
 
+function isRejected(error: unknown): boolean {
+  return error instanceof BaoError && (error.status === 401 || error.status === 403);
+}
+
+/** `lookup-self` misses group policies, so merge in resultant-acl when allowed. */
+export function mergeEffectivePolicies(tokenPolicies: string[], effective?: string[]) {
+  if (!effective?.length) return { policies: tokenPolicies, effective: false };
+  return { policies: [...new Set([...tokenPolicies, ...effective])], effective: true };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const initial = getBaoConfig();
   const [status, setStatus] = useState<Status>(initial.token ? 'loading' : 'anonymous');
   const [identity, setIdentity] = useState<Identity | null>(null);
+  const [effectivePolicies, setEffectivePolicies] = useState(false);
   const [address, setAddressState] = useState(initial.address);
   const [namespace, setNamespaceState] = useState(initial.namespace);
   const [error, setError] = useState<string | null>(null);
 
-  const refreshIdentity = useCallback(async (): Promise<boolean> => {
+  const refreshIdentity = useCallback(async (
+    options: { preserveOnError?: boolean } = {},
+  ): Promise<{ ok: boolean; error?: unknown }> => {
     try {
       const result = await bao.lookupSelf();
-      setIdentity(result.data);
+      let policies = result.data.policies ?? [];
+      let fromAcl = false;
+      try {
+        // Group policies are only visible through this endpoint. A 403 here
+        // must not invalidate an otherwise healthy token.
+        const acl = await bao.resultantAcl();
+        const merged = mergeEffectivePolicies(policies, acl.data.policies);
+        policies = merged.policies;
+        fromAcl = merged.effective;
+      } catch {
+        // Fall back to the token's directly attached policies.
+      }
+      setIdentity({ ...result.data, policies });
+      setEffectivePolicies(fromAcl);
       setStatus('authenticated');
       setError(null);
-      return true;
+      return { ok: true };
     } catch (error) {
-      clearBaoSession();
-      setIdentity(null);
-      setStatus('anonymous');
-      setError(messageOf(error));
-      return false;
+      if (isRejected(error)) {
+        clearBaoSession();
+        setIdentity(null);
+        setEffectivePolicies(false);
+        setStatus('anonymous');
+        setError(messageOf(error));
+      } else {
+        // Network errors, 404s and 5xx must not silently log the user out.
+        if (!options.preserveOnError || !getBaoConfig().token) {
+          clearBaoSession();
+          setIdentity(null);
+          setStatus('anonymous');
+        }
+        setError(`Session check failed: ${messageOf(error)}.`);
+      }
+      return { ok: false, error };
     }
   }, []);
 
   useEffect(() => {
-    if (getBaoConfig().token) void refreshIdentity();
+    if (getBaoConfig().token) void refreshIdentity({ preserveOnError: true });
   }, [refreshIdentity]);
 
   const setAddress = useCallback((value: string) => {
@@ -70,7 +109,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const setNamespace = useCallback((value: string) => {
     setNamespaceState(value);
     setBaoConfig({ namespace: value });
-  }, []);
+    void queryClient.clear();
+  }, [queryClient]);
 
   const loginWithToken = useCallback(
     async (token: string, nextAddress?: string, nextNamespace?: string) => {
@@ -78,9 +118,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (nextAddress) setAddress(nextAddress);
       if (nextNamespace !== undefined) setNamespace(nextNamespace);
       setBaoConfig({ token: token.trim() });
-      if (!(await refreshIdentity())) {
-        throw new Error('OpenBao did not accept that token.');
-      }
+      const result = await refreshIdentity();
+      if (!result.ok) throw result.error instanceof Error ? result.error : new Error('OpenBao did not accept that token.');
     },
     [refreshIdentity, setAddress, setNamespace],
   );
@@ -90,13 +129,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setError(null);
       if (nextAddress) setAddress(nextAddress);
       if (nextNamespace !== undefined) setNamespace(nextNamespace);
-      try {
-        const result = await bao.loginUserpass(username, password);
-        setBaoConfig({ token: result.auth.client_token });
-        await refreshIdentity();
-      } catch (error) {
-        setError(messageOf(error));
-        throw error;
+      const result = await bao.loginUserpass(username, password);
+      setBaoConfig({ token: result.auth.client_token });
+      const identityResult = await refreshIdentity();
+      if (!identityResult.ok) {
+        throw identityResult.error instanceof Error
+          ? identityResult.error
+          : new Error('OpenBao did not accept that session.');
       }
     },
     [refreshIdentity, setAddress, setNamespace],
@@ -111,6 +150,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearBaoSession();
     queryClient.clear();
     setIdentity(null);
+    setEffectivePolicies(false);
     setStatus('anonymous');
   }, [queryClient]);
 
@@ -118,6 +158,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       status,
       identity,
+      effectivePolicies,
       address,
       namespace,
       error,
@@ -127,7 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setNamespace,
       logout,
     }),
-    [status, identity, address, namespace, error, loginWithToken, loginWithUserpass, setAddress, setNamespace, logout],
+    [status, identity, effectivePolicies, address, namespace, error, loginWithToken, loginWithUserpass, setAddress, setNamespace, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

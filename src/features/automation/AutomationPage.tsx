@@ -48,9 +48,10 @@ export function AutomationPage() {
                 <dt className="muted">Entity</dt><dd className="mono small" style={{ margin: 0 }}>{auth.identity?.entity_id || '—'}</dd>
                 <dt className="muted">Session</dt><dd style={{ margin: 0 }}><Clock size={13} /> {tokenTtlLabel(auth.identity?.policies, auth.identity?.ttl, auth.identity?.expire_time)}</dd>
                 <dt className="muted">Namespace</dt><dd className="mono small" style={{ margin: 0 }}>{auth.namespace || 'root'}</dd>
-                <dt className="muted">Policies</dt>
+                <dt className="muted">Effective policies</dt>
                 <dd style={{ margin: 0, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                   {(auth.identity?.policies ?? []).map((policy) => <Badge key={policy} size="small" variant="outline">{policy}</Badge>)}
+                  {!auth.effectivePolicies && <span className="small muted">Group policies unavailable for this token</span>}
                 </dd>
               </dl>
               <div className="notice small" style={{ marginTop: '1rem' }}>

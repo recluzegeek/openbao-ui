@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, KeyRound, LockKeyhole, ShieldCheck, TerminalSquare } from 'lucide-react';
-import { bao } from '@/lib/api';
+import { bao, normalizeNamespace } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Button } from '@/components/common/Button';
 import { Input } from '@/components/common/Input';
@@ -46,8 +46,10 @@ export function LoginPage() {
     setLocalError(null);
     setBusy(true);
     try {
-      if (method === 'token') await auth.loginWithToken(token, address, namespace);
-      else await auth.loginWithUserpass(username, password, address, namespace);
+      const nextNamespace = normalizeNamespace(namespace);
+      setNamespace(nextNamespace);
+      if (method === 'token') await auth.loginWithToken(token, address, nextNamespace);
+      else await auth.loginWithUserpass(username, password, address, nextNamespace);
       addToast('success', 'Signed in');
       await navigate({ to: '/secrets', search: { project: undefined, env: undefined, service: undefined, folder: undefined }, replace: true });
     } catch (error) {
@@ -134,7 +136,7 @@ export function LoginPage() {
                 <Button variant={method === 'token' ? 'primary' : 'outlined'} onClick={() => setMethod('token')} size="small" icon={<KeyRound size={15} />}>
                   Token
                 </Button>
-                <Button variant="outlined" disabled size="small" icon={<TerminalSquare size={15} />} title="OIDC login is not wired up in this first slice">
+                <Button variant={method === 'oidc' ? 'primary' : 'outlined'} size="small" icon={<TerminalSquare size={15} />} onClick={() => setMethod('oidc')} title="OIDC login is not wired up in this first slice">
                   OIDC
                 </Button>
               </div>
@@ -147,7 +149,6 @@ export function LoginPage() {
               ) : (
                 <form onSubmit={handleSubmit} className="grid" style={{ gap: '0.9rem' }}>
                   <Input label="Server address" value={address} onChange={(e) => { setAddress(e.target.value); auth.setAddress(e.target.value); }} fullWidth />
-                  <Input label="Namespace (optional)" value={namespace} onChange={(e) => setNamespace(e.target.value)} placeholder="e.g. team-a" fullWidth />
                   {method === 'token' ? (
                     <Input label="OpenBao token" type="password" value={token} onChange={(e) => setToken(e.target.value)} autoComplete="off" required fullWidth />
                   ) : (
@@ -156,6 +157,7 @@ export function LoginPage() {
                       <Input label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required fullWidth />
                     </>
                   )}
+                  <Input label="Namespace (optional)" value={namespace} onChange={(e) => setNamespace(e.target.value)} placeholder="e.g. team-a" fullWidth />
                   <Button type="submit" loading={busy} fullWidth>Sign in to console</Button>
                 </form>
               )}
@@ -163,7 +165,7 @@ export function LoginPage() {
           )}
 
           <p className="small muted" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <LockKeyhole size={14} /> Secrets are masked by default. Nothing is cached in local storage.
+            <LockKeyhole size={14} /> Secrets are masked by default. Sign-in stays in this tab; theme, favorites and onboarding preferences are saved in this browser.
           </p>
         </div>
       </main>

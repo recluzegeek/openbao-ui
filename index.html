@@ -4,6 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
+    <script>
+      // Apply the saved theme before first paint so native controls and the
+      // canvas agree with the cards, including after a reload.
+      (function () {
+        try {
+          var saved = localStorage.getItem('console.theme');
+          var theme = saved === 'light' || saved === 'dark'
+            ? saved
+            : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+          document.documentElement.dataset.theme = theme;
+        } catch (_) {}
+      })();
+    </script>
     <meta name="description" content="Community OpenBao console: environment-aware secrets, one-time codes, and automation views." />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />

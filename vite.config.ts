@@ -65,7 +65,7 @@ function devAuditLog(): Plugin {
         // Try the next local container runtime.
       }
     }
-    throw new Error(`Cannot read the audit log from container ${container}.`);
+    throw new Error('Audit log bridge is not available.');
   }
 
   return {
@@ -114,13 +114,10 @@ function devAuditLog(): Plugin {
             .slice(-limit)
             .reverse();
           res.end(JSON.stringify({ available: true, entries }));
-        } catch (error) {
-          res.statusCode = 503;
-          res.end(JSON.stringify({
-            available: false,
-            entries: [],
-            error: error instanceof Error ? error.message : 'Audit log unavailable',
-          }));
+        } catch {
+          // "No audit provider" is a normal state, not an HTTP failure. Keep
+          // container details on the dev server only; never leak them to the UI.
+          res.end(JSON.stringify({ available: false, entries: [] }));
         }
       });
     },

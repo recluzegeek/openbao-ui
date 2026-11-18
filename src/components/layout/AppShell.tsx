@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Activity, BookOpen, Compass, KeyRound, Keyboard, LogOut, Moon, Search, Server, Shield, ShieldCheck, Sun, TerminalSquare } from 'lucide-react';
+import { bao, normalizeNamespace } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useTheme } from '@/lib/useTheme';
 import { tokenTtlLabel } from '@/lib/format';
@@ -20,16 +21,44 @@ const links = [
 ];
 
 export function AppShell() {
+  const auditConfigured = import.meta.env.DEV || Boolean(import.meta.env.VITE_AUDIT_ENDPOINT);
+  const visibleLinks = auditConfigured ? links : links.filter((link) => link.to !== '/audit');
   const auth = useAuth();
   const navigate = useNavigate();
   const { theme, toggle } = useTheme();
-  const queryClient = useQueryClient();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [namespaceDraft, setNamespaceDraft] = useState(auth.namespace);
+  const [namespaceError, setNamespaceError] = useState<string | null>(null);
+
+  const namespacesQ = useQuery({
+    queryKey: ['namespaces', auth.address],
+    queryFn: () => bao.listNamespaces(),
+    enabled: auth.status === 'authenticated',
+    retry: false,
+    staleTime: 60_000,
+  });
+
+  useEffect(() => {
+    setNamespaceDraft(auth.namespace);
+    setNamespaceError(null);
+  }, [auth.namespace]);
 
   useEffect(() => {
     if (auth.status === 'anonymous') void navigate({ to: '/login', replace: true });
   }, [auth.status, navigate]);
+
+  function applyNamespace(event?: FormEvent) {
+    event?.preventDefault();
+    try {
+      const next = normalizeNamespace(namespaceDraft);
+      setNamespaceError(null);
+      setNamespaceDraft(next);
+      if (next !== auth.namespace) auth.setNamespace(next);
+    } catch (error) {
+      setNamespaceError(error instanceof Error ? error.message : 'Invalid namespace');
+    }
+  }
 
   // Global keyboard shortcuts. Typing in a field takes priority so secret values
   // are never intercepted, and ⌘K stays owned by the command palette.
@@ -94,8 +123,8 @@ export function AppShell() {
 
         <nav className="nav-group" aria-label="Workspace">
           <div className="nav-group__label">Workspace</div>
-          {links.map(({ to, label, icon: Icon }) => (
-            <Link key={to} to={to} className={`nav-link ${pathname === to ? 'active' : ''}`} aria-current={pathname === to ? 'page' : undefined}>
+          {visibleLinks.map(({ to, label, icon: Icon }) => (
+            <Link key={to} to={to} data-testid={`nav-${to.slice(1)}`} className={`nav-link ${pathname === to ? 'active' : ''}`} aria-current={pathname === to ? 'page' : undefined}>
               <Icon size={18} />
               <span>{label}</span>
             </Link>
@@ -112,8 +141,8 @@ export function AppShell() {
             </div>
             <div className="identity-chip__meta">
               <div className="identity-chip__name" title={displayName}>{displayName}</div>
-              <div className="identity-chip__sub">
-                {policies.length ? `${policies.length} polic${policies.length === 1 ? 'y' : 'ies'} · ${ttlLabel}` : 'token session'}
+              <div className="identity-chip__sub" title={auth.effectivePolicies ? 'Includes group policies from resultant-acl' : 'Direct token policies; group policies are unavailable for this token'}>
+                {policies.length ? `${policies.length} polic${policies.length === 1 ? 'y' : 'ies'}${auth.effectivePolicies ? ' · effective' : ''} · ${ttlLabel}` : 'token session'}
               </div>
             </div>
             <button className="icon-btn" title="Sign out" aria-label="Sign out" onClick={() => void auth.logout()}>
@@ -147,18 +176,27 @@ export function AppShell() {
             >
               <Keyboard size={17} />
             </button>
-            <label className="small muted" htmlFor="namespace">Namespace</label>
-            <input
-              id="namespace"
-              aria-label="OpenBao namespace"
-              placeholder="root"
-              value={auth.namespace}
-              onChange={(event) => {
-                auth.setNamespace(event.target.value);
-                void queryClient.clear();
-              }}
-              style={{ width: 130, padding: '0.4rem 0.6rem', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', background: 'var(--color-background)', color: 'var(--color-text-primary)' }}
-            />
+            <form className="namespace-control" onSubmit={applyNamespace} title={namespaceError ?? 'Namespace changes are applied only when you click Apply'}>
+              <label className="small muted" htmlFor="namespace">Namespace</label>
+              <input
+                id="namespace"
+                aria-label="OpenBao namespace"
+                aria-invalid={Boolean(namespaceError)}
+                data-testid="namespace-input"
+                list="namespace-options"
+                placeholder="root"
+                value={namespaceDraft}
+                onChange={(event) => setNamespaceDraft(event.target.value)}
+                onKeyDown={(event) => { if (event.key === 'Enter') applyNamespace(); }}
+              />
+              <datalist id="namespace-options">
+                {(namespacesQ.data ?? []).map((name) => <option key={name} value={name} />)}
+              </datalist>
+              <button type="submit" className="btn btn--ghost btn--small" data-testid="namespace-apply" disabled={namespaceDraft === auth.namespace}>
+                Apply
+              </button>
+            </form>
+            {namespaceError && <span className="small" role="alert" style={{ color: 'var(--color-red)' }}>{namespaceError}</span>}
             <button className="icon-btn" onClick={toggle} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} title="Toggle theme">
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>

@@ -8,6 +8,9 @@ export function RecentActivityPanel({ path }: { path?: string }) {
   const audit = useAuditTrail(path);
   const entries = audit.data?.entries ?? [];
 
+  // A hidden or unavailable audit provider is not a secret-browsing error.
+  if (!path || audit.data?.available === false || audit.isError) return null;
+
   return (
     <div className="panel">
       <div className="panel__head">
@@ -16,13 +19,7 @@ export function RecentActivityPanel({ path }: { path?: string }) {
         {entries.length > 0 && <Badge size="small">{entries.length}</Badge>}
       </div>
       <div className="panel__body">
-        {!path && <p className="muted">Select a secret to see who touched it.</p>}
-        {path && audit.isLoading && <div className="state"><div className="spinner" /></div>}
-        {audit.isError && (
-          <div className="notice small">
-            Audit trail unavailable here — {audit.error instanceof Error ? audit.error.message : 'local log bridge is not running'}. This panel is best-effort and does not block secret browsing.
-          </div>
-        )}
+        {audit.isLoading && <div className="state"><div className="spinner" /></div>}
         {audit.data && entries.length === 0 && <p className="muted">No recent audit entries for this path.</p>}
         {entries.map((entry, index) => (
           <div className="activity-row" key={`${entry.time}-${index}`}>

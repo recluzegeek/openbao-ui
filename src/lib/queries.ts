@@ -170,19 +170,25 @@ export function environmentCreationTarget(project: string | undefined, env: stri
 }
 
 export function useSecret(project?: string, env?: string, service?: string, version?: number) {
+  // The resolver is registered by discovery. Reading before it settles would
+  // hit the legacy fallback path and surface a false "Not Found" on reload.
+  const discovery = useLayoutDiscovery(project);
+  const ready = Boolean(project && env && service) && (discovery.isSuccess || discovery.isError);
   return useQuery({
-    queryKey: ['secret', project, env, service, version ?? 'latest'],
+    queryKey: ['secret', project, env, service, version ?? 'latest', discovery.data?.profile.kind ?? 'pending'],
     queryFn: () => bao.readSecret(secretApiPath(project!, env!, service!), version),
-    enabled: Boolean(project && env && service),
+    enabled: ready,
     staleTime: 15_000,
   });
 }
 
 export function useSecretMetadata(project?: string, env?: string, service?: string) {
+  const discovery = useLayoutDiscovery(project);
+  const ready = Boolean(project && env && service) && (discovery.isSuccess || discovery.isError);
   return useQuery({
-    queryKey: ['secret-metadata', project, env, service],
+    queryKey: ['secret-metadata', project, env, service, discovery.data?.profile.kind ?? 'pending'],
     queryFn: () => bao.readMetadata(secretApiPath(project!, env!, service!)),
-    enabled: Boolean(project && env && service),
+    enabled: ready,
     staleTime: 30_000,
   });
 }
@@ -194,6 +200,9 @@ export function useCapabilities(paths: string[]) {
     queryFn: () => bao.capabilities(paths).then((res) => res.data),
     enabled: paths.length > 0,
     staleTime: 60_000,
+    // Fail closed immediately; global 5xx/network retries kept action buttons
+    // disabled for seconds on every page load.
+    retry: false,
   });
 }
 

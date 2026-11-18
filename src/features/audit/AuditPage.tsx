@@ -132,9 +132,14 @@ export function AuditPage() {
 
       {audit.isError && <ErrorState error={audit.error} onRetry={() => void audit.refetch()} />}
       {!audit.isError && audit.isLoading && <div className="state"><div className="spinner" /></div>}
-      {!audit.isError && audit.data && entries.length === 0 && (
+      {!audit.isError && audit.data?.available === false && (
+        <EmptyState title="Audit log is not configured">
+          This deployment has no audit log provider. Secret browsing is unaffected.
+        </EmptyState>
+      )}
+      {!audit.isError && audit.data && audit.data.available !== false && entries.length === 0 && (
         <EmptyState title="No audit entries loaded">
-          The local log bridge could not read the OpenBao audit file. It is dev-only and optional.
+          No matching activity was returned by the configured audit provider.
         </EmptyState>
       )}
       {!audit.isError && entries.length > 0 && visible.length === 0 && (
