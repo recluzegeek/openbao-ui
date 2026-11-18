@@ -65,21 +65,32 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
   );
 }
 
-export function Dialog({ title, onClose, children, footer, testId }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; testId?: string }) {
+export function Dialog({ title, onClose, children, footer, testId, guardClose }: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+  testId?: string;
+  /** Return false to veto a dismiss (Escape, backdrop or close button), e.g. to confirm unsaved edits. */
+  guardClose?: () => boolean;
+}) {
+  const close = () => {
+    if (!guardClose || guardClose()) onClose();
+  };
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') close();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [onClose]);
+  });
 
   return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}>
       <div className="dialog" role="dialog" aria-modal="true" aria-label={title} data-testid={testId}>
         <div className="dialog__head">
           <h2>{title}</h2>
-          <button className="icon-btn" onClick={onClose} aria-label="Close dialog">
+          <button className="icon-btn" onClick={close} aria-label="Close dialog">
             <X size={18} />
           </button>
         </div>

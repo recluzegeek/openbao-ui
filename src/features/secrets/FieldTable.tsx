@@ -92,15 +92,18 @@ export function FieldTable({
                 </button>
               )}
               <span className="field-table__row-actions">
-                <button
-                  type="button"
-                  className="icon-btn"
-                  aria-label={isRevealed ? `Hide ${row.key || 'field'}` : `Reveal ${row.key || 'field'}`}
-                  title={isRevealed ? 'Hide value' : 'Reveal value'}
-                  onClick={() => setRevealed((current) => ({ ...current, [row.id]: !isRevealed }))}
-                >
-                  {isRevealed ? <EyeOff size={14} /> : <Eye size={14} />}
-                </button>
+                {/* One reveal affordance only: the masked button reveals, this hides. */}
+                {isRevealed && !revealAll && (
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    aria-label={`Hide ${row.key || 'field'}`}
+                    title="Hide value"
+                    onClick={() => setRevealed((current) => ({ ...current, [row.id]: false }))}
+                  >
+                    <EyeOff size={14} />
+                  </button>
+                )}
                 <CopyButton value={row.value} label={`Copy ${row.key || 'field'}`} />
               </span>
             </div>

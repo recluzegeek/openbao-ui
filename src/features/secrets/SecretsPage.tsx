@@ -69,6 +69,19 @@ import { VersionHistoryPanel } from './VersionHistoryPanel';
 
 type Search = Record<string, string | undefined>;
 
+type EditorState = {
+  mode: 'create' | 'edit';
+  name: string;
+  rows: FieldRow[];
+  annotations: SecretAnnotations;
+  baseMetadata: Record<string, string>;
+};
+
+/** Only user-editable parts count, so save state never changes the dirty flag. */
+function editorSnapshot(editor: EditorState): string {
+  return JSON.stringify({ name: editor.name, rows: editor.rows, annotations: editor.annotations });
+}
+
 function SecretField({ name, value, comment, override, resolved, resetKey }: {
   name: string;
   value: unknown;
@@ -234,13 +247,9 @@ export function SecretsPage() {
   const [promoteTo, setPromoteTo] = useState<string | null>(null);
   const [confirmCopyEnv, setConfirmCopyEnv] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
-  const [editor, setEditor] = useState<{
-    mode: 'create' | 'edit';
-    name: string;
-    rows: FieldRow[];
-    annotations: SecretAnnotations;
-    baseMetadata: Record<string, string>;
-  } | null>(null);
+  const [editor, setEditor] = useState<EditorState | null>(null);
+  const [editorBaseline, setEditorBaseline] = useState('');
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [revealValues, setRevealValues] = useState(false);
@@ -455,30 +464,36 @@ export function SecretsPage() {
   async function openCreate() {
     setEditorError(null);
     setDialog(null);
-    setEditor({
+    setConfirmDiscard(false);
+    const next: EditorState = {
       mode: 'create',
       name: folder ? `${folder}/` : '',
       rows: [{ id: 'new-0', key: '', value: '' }],
       annotations: { tags: [], note: '', comments: {}, overrides: {} },
       baseMetadata: {},
-    });
+    };
+    setEditor(next);
+    setEditorBaseline(editorSnapshot(next));
   }
 
   async function openEdit() {
     if (!project || !env || !service) return;
     setEditorError(null);
     setDialog(null);
+    setConfirmDiscard(false);
     try {
       // Always edit the latest version, even if an older version is being viewed.
       const api = secretApiPath(project, env, service);
       const [latest, meta] = await Promise.all([bao.readSecret(api), bao.readMetadata(api)]);
-      setEditor({
+      const next: EditorState = {
         mode: 'edit',
         name: service,
         rows: rowsFromData(latest.data.data),
         annotations: parseAnnotations(meta.data.custom_metadata),
         baseMetadata: meta.data.custom_metadata ?? {},
-      });
+      };
+      setEditor(next);
+      setEditorBaseline(editorSnapshot(next));
     } catch (error) {
       addToast('error', 'Could not load the secret', error instanceof Error ? error.message : undefined);
     }
@@ -882,13 +897,40 @@ export function SecretsPage() {
         </Dialog>
       )}
 
+      {confirmDiscard && (
+        <Dialog
+          title="Discard unsaved changes?"
+          onClose={() => setConfirmDiscard(false)}
+          footer={
+            <>
+              <Button variant="outlined" onClick={() => setConfirmDiscard(false)}>Keep editing</Button>
+              <Button variant="danger" onClick={() => { setConfirmDiscard(false); setEditor(null); setEditorBaseline(''); }}>Discard changes</Button>
+            </>
+          }
+        >
+          <p className="small muted">Your staged field, tag and note changes have not been written to OpenBao and will be lost.</p>
+        </Dialog>
+      )}
+
       {editor && project && env && (
         <Dialog
           title={editor.mode === 'create' ? `New secret in ${env}` : `Edit ${editor.name}`}
           onClose={() => { if (dialog) setDialog(null); else setEditor(null); }}
+          guardClose={() => {
+            // Nested dialogs (import, export, bulk) handle their own Escape.
+            if (dialog || confirmDiscard) return false;
+            if (editorBaseline && editorSnapshot(editor) !== editorBaseline) {
+              setConfirmDiscard(true);
+              return false;
+            }
+            return true;
+          }}
           footer={
             <>
-              <Button variant="outlined" onClick={() => setEditor(null)} disabled={saving}>Cancel</Button>
+              <Button variant="outlined" onClick={() => {
+                if (editorBaseline && editorSnapshot(editor) !== editorBaseline) setConfirmDiscard(true);
+                else setEditor(null);
+              }} disabled={saving}>Cancel</Button>
               <Button
                 icon={<Lock size={15} />}
                 onClick={() => void saveEditor()}
