@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -16,12 +16,12 @@ import {
 import type { ReactNode } from 'react';
 import {
   completeOnboarding,
-  deriveSetupStage,
   dismissOnboarding,
+  isOnboardingComplete,
   setupSnippets,
   type SetupStage,
 } from '@/lib/setup';
-import { useKvMount, useProjects, useSetupHealth, useSetupSeal } from '@/lib/queries';
+import { useKvMount, useProjects, useSetupHealth, useSetupSeal, useSetupStage } from '@/lib/queries';
 import { Badge } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
 import { CodeSnippet } from '@/components/common/Extras';
@@ -29,7 +29,7 @@ import { CodeSnippet } from '@/components/common/Extras';
 interface Step {
   id: string;
   title: string;
-  description: string;
+  description: ReactNode;
   icon: ReactNode;
   done: boolean;
   detail?: ReactNode;
@@ -53,16 +53,12 @@ export function WelcomePage() {
   const kv = useKvMount();
   const projects = useProjects();
 
-  const stage = useMemo(
-    () => deriveSetupStage({
-      health: health.data,
-      healthFailed: health.isError,
-      seal: seal.data,
-      kvMounted: kv.data,
-      projects: projects.data,
-    }),
-    [health.data, health.isError, seal.data, kv.data, projects.data],
-  );
+  const stage = useSetupStage();
+  const setupComplete = stage === 'ready';
+
+  useEffect(() => {
+    if (setupComplete && !isOnboardingComplete()) completeOnboarding();
+  }, [setupComplete]);
 
   function finish() {
     completeOnboarding();
@@ -105,7 +101,7 @@ export function WelcomePage() {
     {
       id: 'mount',
       title: 'Enable a version-2 KV engine',
-      description: 'Secrets, folders, versions and metadata all live under `kv/`.',
+      description: <>Secrets, folders, versions and metadata live in a KV engine such as <code>kv/</code>.</>,
       icon: <Database size={18} />,
       done: kvReady,
       detail: kv.data === false
@@ -115,7 +111,7 @@ export function WelcomePage() {
     {
       id: 'project',
       title: 'Create your first project',
-      description: 'Projects map to paths like `kv/data/<project>/env/<env>/<secret>`.',
+      description: <>A project maps to a KV subtree; paths are discovered from your server, for example <code>kv/data/my-project/env/development/web</code>.</>,
       icon: <KeyRound size={18} />,
       done: (projects.data?.length ?? 0) > 0,
       detail: projects.data?.length === 0 ? (
@@ -133,7 +129,7 @@ export function WelcomePage() {
       title: 'Explore the console',
       description: 'Search across environments, inspect access, and read the audit trail.',
       icon: <Compass size={18} />,
-      done: false,
+      done: setupComplete,
       detail: (
         <div className="method-chips">
           <Button size="small" variant="outlined" onClick={() => void navigate({ to: '/search', search: { q: undefined } })}>Global search</Button>
@@ -145,8 +141,8 @@ export function WelcomePage() {
     },
   ];
 
-  const doneCount = steps.filter((step) => step.done).length;
-  const currentId = steps.find((step) => !step.done)?.id ?? 'explore';
+  const doneCount = steps.filter((step) => step.id !== 'explore' && step.done).length;
+  const currentId = setupComplete ? undefined : steps.find((step) => !step.done)?.id;
   const checking = stage === 'checking' && health.isLoading;
 
   return (
@@ -154,12 +150,16 @@ export function WelcomePage() {
       <div className="page__header">
         <div>
           <h2>Getting started</h2>
-          <p>A short checklist that follows the real state of your local OpenBao server.</p>
+          <p>A short checklist that follows the real state of your OpenBao server.</p>
         </div>
-        <Badge variant="primary"><Rocket size={13} /> {doneCount}/{steps.length - 1} set up</Badge>
+        {setupComplete ? (
+          <Badge variant="success" data-testid="welcome-complete"><Rocket size={13} /> Setup complete</Badge>
+        ) : (
+          <Badge variant="primary"><Rocket size={13} /> {doneCount}/{steps.length - 1} set up</Badge>
+        )}
       </div>
 
-      <div className="notice info small">
+      <div className="notice info small" data-testid="welcome-stage">
         <Activity size={14} /> {STAGE_TITLES[stage]}
       </div>
 

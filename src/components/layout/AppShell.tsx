@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Activity, BookOpen, Compass, KeyRound, Keyboard, LogOut, Moon, Search, Server, Shield, ShieldCheck, Sun, TerminalSquare } from 'lucide-react';
 import { bao, normalizeNamespace } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { useSetupStage } from '@/lib/queries';
 import { useTheme } from '@/lib/useTheme';
 import { tokenTtlLabel } from '@/lib/format';
 import { CommandPalette } from './CommandPalette';
@@ -22,7 +23,10 @@ const links = [
 
 export function AppShell() {
   const auditConfigured = import.meta.env.DEV || Boolean(import.meta.env.VITE_AUDIT_ENDPOINT);
-  const visibleLinks = auditConfigured ? links : links.filter((link) => link.to !== '/audit');
+  const stage = useSetupStage();
+  const visibleLinks = links.filter((link) =>
+    (link.to !== '/audit' || auditConfigured)
+    && (link.to !== '/welcome' || stage !== 'ready'));
   const auth = useAuth();
   const navigate = useNavigate();
   const { theme, toggle } = useTheme();

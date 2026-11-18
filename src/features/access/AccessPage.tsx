@@ -4,8 +4,24 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Bot, ClipboardCheck, Layers3, ShieldCheck } from 'lucide-react';
 import { bao } from '@/lib/api';
 import { can } from '@/lib/capabilities';
-import { accessCapabilityPaths, useAuthMethods, useCapabilities, useEnvironments, usePolicies, useProjects } from '@/lib/queries';
-import { generateHcl, parseHcl, type PolicyRule } from '@/lib/policy';
+import {
+  accessCapabilityPaths,
+  useAuthMethods,
+  useCapabilities,
+  useEnvironments,
+  useLayoutDiscovery,
+  usePolicies,
+  useProjects,
+} from '@/lib/queries';
+import {
+  generateHcl,
+  inferRolePolicyNames,
+  parseHcl,
+  projectPolicyNames,
+  simulatorPathsFromLayout,
+  templateRulesFromLayout,
+  type PolicyRule,
+} from '@/lib/policy';
 import { useToast } from '@/lib/toast';
 import { ErrorState } from '@/components/common/Extras';
 import { RoleTemplates } from './RoleTemplates';
@@ -28,9 +44,9 @@ export function AccessPage() {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
   const view: View = VIEWS.some((item) => item.id === search.view) ? search.view as View : 'roles';
-  const [project, setProject] = useState(search.project ?? 'ui-demo');
+  const [project, setProject] = useState(search.project ?? '');
   const [env, setEnv] = useState(search.env ?? '*');
-  const [builderName, setBuilderName] = useState(`${search.project ?? 'ui-demo'}-viewer`);
+  const [builderName, setBuilderName] = useState(search.project ? `${search.project}-viewer` : '');
   const [builderRules, setBuilderRules] = useState<PolicyRule[]>([]);
   const [builderHcl, setBuilderHcl] = useState<string>();
 
@@ -38,20 +54,26 @@ export function AccessPage() {
   const envs = useEnvironments(project);
   const policies = usePolicies();
   const authMethods = useAuthMethods();
+  const discovery = useLayoutDiscovery(project);
+  const profile = discovery.data?.profile;
+  const classified = discovery.data?.classified ?? [];
+  const policyNames = projectPolicyNames(project, policies.data ?? []);
+  const roleNames = inferRolePolicyNames(project, env, policies.data ?? []);
   const caps = useCapabilities(accessCapabilityPaths()).data;
   const canListPolicies = can(caps, 'sys/policies/acl/', 'list');
   const canWritePolicy = can(caps, 'sys/policies/acl/__new__', 'create') || can(caps, 'sys/policies/acl/', 'create');
   const canSimulate = can(caps, 'auth/token/create', 'create');
 
   useEffect(() => {
-    if (!builderRules.length && !builderHcl) {
-      const parsed = parseHcl(generateHcl([
-        { path: `kv/data/${project}/env/*`, capabilities: ['read'] },
-      ]));
-      setBuilderRules(parsed.rules);
-      setBuilderName(`${project}-viewer`);
-    }
-  }, [project]);
+    if (!project && projects.data?.length) setProject(projects.data[0]);
+  }, [project, projects.data]);
+
+  useEffect(() => {
+    if (builderRules.length || builderHcl || !profile || !project) return;
+    const rules = templateRulesFromLayout('viewer', project, env, profile, classified);
+    setBuilderRules(parseHcl(generateHcl(rules)).rules);
+    setBuilderName(roleNames.viewer ?? `${project}-viewer`);
+  }, [project, env, profile, classified, builderRules.length, builderHcl, roleNames.viewer]);
 
   function setView(next: View) {
     void navigate({ search: (prev) => ({ ...prev, view: next === 'roles' ? undefined : next }), replace: true });
@@ -85,6 +107,7 @@ export function AccessPage() {
 
   const projectList = projects.data ?? [];
   const envList = envs.data ?? [];
+  const samplePath = classified[0] ? `kv/data/${classified[0].physical}` : undefined;
 
   return (
     <div className="grid" style={{ gap: '1rem' }}>
@@ -152,7 +175,10 @@ export function AccessPage() {
           project={project}
           env={env}
           canWrite={canWritePolicy}
-          policies={(policies.data ?? []).filter((name) => name.startsWith(project))}
+          policies={policyNames}
+          profile={profile}
+          classified={classified}
+          roleNames={roleNames}
           onLoadTemplate={loadBuilder}
           onOpenPolicy={(name) => void openPolicy(name)}
           onSaved={refresh}
@@ -166,6 +192,7 @@ export function AccessPage() {
           initialHcl={builderHcl}
           canWrite={canWritePolicy}
           existingPolicies={policies.data ?? []}
+          samplePath={samplePath}
           onNameChange={setBuilderName}
           onRulesChange={(rules) => { setBuilderRules(rules); setBuilderHcl(undefined); }}
           onSaved={refresh}
@@ -175,14 +202,16 @@ export function AccessPage() {
         <AccessSimulator
           project={project}
           env={env}
-          policies={policies.data ?? []}
+          policies={policyNames}
+          presetPaths={profile ? simulatorPathsFromLayout(profile, project, env, classified) : undefined}
+          samplePath={samplePath}
           canSimulate={canSimulate}
         />
       )}
       {view === 'identities' && (
         <MachineIdentities
           project={project}
-          policies={policies.data ?? []}
+          policies={policyNames}
           authMethods={authMethods.data ?? []}
         />
       )}

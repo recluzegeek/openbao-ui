@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import { BookOpen, Database, ExternalLink, Link2, ListOrdered, RefreshCw, User } from 'lucide-react';
 import { can, deniedReason } from '@/lib/capabilities';
+import { runbookApiPath } from '@/lib/baoPaths';
 import { useCapabilities, useRunbook, useRunbookProjects, runbookCapabilityPaths } from '@/lib/queries';
 import { formatWhen } from '@/lib/format';
 import { useClipboard } from '@/lib/useClipboard';
@@ -83,7 +84,7 @@ export function RunbooksPage() {
   const capsQ = useCapabilities(runbookCapabilityPaths(projects));
   const caps = capsQ.data;
   const canList = can(caps, 'kv/metadata/_runbooks/', 'list');
-  const readPath = selected ? `kv/data/_runbooks/${selected}` : '';
+  const readPath = selected ? runbookApiPath(selected) : '';
   const canRead = can(caps, readPath, 'read');
   const runbookQ = useRunbook(selected);
 
@@ -136,7 +137,7 @@ export function RunbooksPage() {
               <BookOpen size={16} />
               <span className="list-item__main">
                 <span className="list-item__title">{project}</span>
-                <span className="list-item__sub">kv/data/_runbooks/{project}</span>
+                <span className="list-item__sub">{runbookApiPath(project)}</span>
               </span>
             </button>
           ))}
@@ -212,8 +213,8 @@ export function RunbooksPage() {
                   )}
                   <div className="divider" />
                   <div className="row-actions">
-                    <code className="small muted">kv/data/_runbooks/{selected}</code>
-                    <CopyButton value={`kv/data/_runbooks/${selected}`} label="Copy runbook path" />
+                    <code className="small muted">{selected ? runbookApiPath(selected) : ''}</code>
+                    <CopyButton value={selected ? runbookApiPath(selected) : ''} label="Copy runbook path" />
                   </div>
                 </>
               )}

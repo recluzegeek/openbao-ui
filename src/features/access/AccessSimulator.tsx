@@ -12,6 +12,9 @@ interface AccessSimulatorProps {
   env: string;
   policies: string[];
   canSimulate: boolean;
+  /** Real KV paths from layout discovery; when absent, fall back to the legacy heuristic. */
+  presetPaths?: string[];
+  samplePath?: string;
 }
 
 type Source = 'real' | 'estimated';
@@ -29,14 +32,18 @@ function capTone(cap: string, caps: string[]): string {
   return cap === 'deny' ? 'cap-cell--deny' : 'cap-cell--yes';
 }
 
-export function AccessSimulator({ project, env, policies, canSimulate }: AccessSimulatorProps) {
+export function AccessSimulator({ project, env, policies, canSimulate, presetPaths: discoveredPaths, samplePath }: AccessSimulatorProps) {
   const { addToast } = useToast();
   const entities = useEntities();
   const [selected, setSelected] = useState<string[]>(() =>
     ['viewer', 'developer', 'admin'].map((role) => `${project}-${role}`).filter((name) => policies.includes(name)),
   );
   // The "all environments" selector is a policy scope, not a real path segment.
-  const [presetPaths] = useState(() => simulatorPaths(project, env === '*' ? 'development' : env));
+  const [presetPaths] = useState(() =>
+    discoveredPaths?.length
+      ? discoveredPaths
+      : simulatorPaths(project, env === '*' ? 'development' : env),
+  );
   const [customPaths, setCustomPaths] = useState('');
   const [entity, setEntity] = useState('');
   const [result, setResult] = useState<CapabilitiesMap | null>(null);
@@ -130,7 +137,7 @@ export function AccessSimulator({ project, env, policies, canSimulate }: AccessS
                 className="mono"
                 value={customPaths}
                 onChange={(event) => { setCustomPaths(event.target.value); setResult(null); }}
-                placeholder={'kv/data/another-project/env/prod/web'}
+                placeholder={samplePath ?? 'kv/data/another-project/env/prod/web'}
               />
             </div>
           </div>

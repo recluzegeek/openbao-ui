@@ -14,13 +14,14 @@ interface PolicyBuilderProps {
   initialHcl?: string;
   canWrite: boolean;
   existingPolicies: string[];
+  samplePath?: string;
   onNameChange: (name: string) => void;
   onRulesChange: (rules: PolicyRule[]) => void;
   onSaved: () => void;
 }
 
 export function PolicyBuilder({
-  project, name, rules, initialHcl, canWrite, existingPolicies, onNameChange, onRulesChange, onSaved,
+  project, name, rules, initialHcl, canWrite, existingPolicies, samplePath, onNameChange, onRulesChange, onSaved,
 }: PolicyBuilderProps) {
   const { addToast } = useToast();
   const [mode, setMode] = useState<'visual' | 'hcl'>(initialHcl === undefined ? 'visual' : 'hcl');
@@ -101,6 +102,10 @@ export function PolicyBuilder({
   }
 
   const preview = mode === 'visual' ? generateHcl(rules) : hcl;
+  // Show a real KV prefix from this server as the example ACL pattern.
+  const pathPlaceholder = samplePath
+    ? `${samplePath.replace(/\/[^/]+$/, '')}/*`
+    : 'kv/data/project/env/*';
 
   return (
     <div className="grid" style={{ gap: '1rem' }}>
@@ -149,7 +154,7 @@ export function PolicyBuilder({
                     aria-label={`Path pattern ${index + 1}`}
                     value={rule.path}
                     onChange={(event) => updateRule(index, { path: event.target.value })}
-                    placeholder="kv/data/project/env/*"
+                    placeholder={pathPlaceholder}
                   />
                   <div className="rule-row__caps">
                     {CAPABILITY_ORDER.map((capability) => (

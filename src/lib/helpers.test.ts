@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { can, deniedReason } from './capabilities';
-import { envRank, parseTotpAccount, secretPath, totpCodePath } from './baoPaths';
+import { envRank, parseTotpAccount, runbookApiPath, runbookMetadataPath, secretPath, totpCodePath } from './baoPaths';
 import { envFile, formatTtl, parsePeriod, secondsUntil, shellQuote, tokenTtlLabel } from './format';
 import { baoCliSnippet, curlSnippet } from './snippets';
 import { dataFromRows, rowsFromData, validSecretName, validateRows } from './secretForm';
 import { bao, normalizeNamespace, request, setBaoConfig } from './api';
 import { mergeEffectivePolicies } from './auth';
-import { capabilityPathsForFolder, capabilityPathsForSecret, environmentCreationTarget } from './queries';
-import { environmentMarkerPath, inferLayout, physicalPath } from './layout';
+import { capabilityPathsForFolder, capabilityPathsForSecret, environmentCreationTarget, runbookCapabilityPaths } from './queries';
+import { environmentMarkerPath, inferLayout, physicalPath, type ClassifiedSecret, type LayoutProfile } from './layout';
 import { clearProjectLayouts, registerProjectLayout, resolveApiPath, resolveEnvMetadataPath, toLogicalPath } from './layoutResolver';
 import { actorLabel, auditCsv, auditPathHref, filterAuditEntries, operationLabel, type AuditEntry, type AuditFilters } from './audit';
 import { buildSecretTree, folderBreadcrumbs, folderInTree, validSecretPath } from './secretTree';
@@ -16,11 +16,17 @@ import { effectiveValue, mergeAnnotations, overridesFor, parseAnnotations, withO
 import { actorForVersion, diffData } from './secretDiff';
 import { isFavorite, loadFavorites, loadRecent, pushRecent, secretHref, toggleFavorite } from './navigationMemory';
 import {
+  discoveredParents,
+  envListMetadataPath,
   generateHcl,
   globMatches,
+  inferRolePolicyNames,
   parseHcl,
+  projectPolicyNames,
   simulateCapabilities,
+  simulatorPathsFromLayout,
   templateRules,
+  templateRulesFromLayout,
 } from './policy';
 import { identitySnippets } from './machineIdentity';
 import { deriveSetupStage, setupSnippets, SHORTCUTS } from './setup';
@@ -549,5 +555,101 @@ describe('session hardening', () => {
     } as unknown as Response);
     expect(await request('kv/metadata/empty/', { list: true })).toEqual({ data: null });
     expect(fetchStub).toHaveBeenCalled();
+  });
+});
+
+describe('runbook paths', () => {
+  it('builds runbook API and metadata paths with the kv mount prefix', () => {
+    expect(runbookApiPath('securus')).toBe('kv/data/_runbooks/securus');
+    expect(runbookMetadataPath('securus')).toBe('kv/metadata/_runbooks/securus');
+  });
+
+  it('gates runbook reads and metadata with capability paths', () => {
+    const paths = runbookCapabilityPaths(['a', 'b']);
+    expect(paths).toContain('kv/metadata/_runbooks/');
+    expect(paths).toContain('kv/data/_runbooks/a');
+    expect(paths).toContain('kv/metadata/_runbooks/a');
+    expect(paths).toContain('kv/data/_runbooks/b');
+    expect(paths).toContain('kv/metadata/_runbooks/b');
+    // Never gate capability checks on the legacy guess for another layout.
+    expect(paths.every((path) => path.startsWith('kv/'))).toBe(true);
+  });
+});
+
+describe('layout-derived policy helpers', () => {
+  const profile: LayoutProfile = {
+    kind: 'project-repo-env',
+    envIndex: 2,
+    componentIndex: 1,
+    metadataKeys: { project: 'project', env: 'env', component: 'component' },
+    description: 'project / repo / <environment>',
+  };
+  const legacy: LayoutProfile = {
+    kind: 'legacy-env',
+    envIndex: 1,
+    componentIndex: -1,
+    metadataKeys: { project: 'project', env: 'env', component: 'component' },
+    description: 'project / env / <environment>',
+  };
+  const classified: ClassifiedSecret[] = [
+    { physical: 'securus/backend/development/database/postgres', project: 'securus', env: 'development', logical: 'database/postgres', component: 'backend', source: 'heuristic' },
+    { physical: 'securus/backend/development/app/config', project: 'securus', env: 'development', logical: 'app/config', component: 'backend', source: 'heuristic' },
+    { physical: 'securus/backend/production/database/postgres', project: 'securus', env: 'production', logical: 'database/postgres', component: 'backend', source: 'heuristic' },
+  ];
+
+  it('chooses the environment-list prefix from the profile', () => {
+    expect(envListMetadataPath(legacy, 'ui-demo')).toBe('kv/metadata/ui-demo/env/');
+    expect(envListMetadataPath(profile, 'securus')).toBe('kv/metadata/securus/');
+  });
+
+  it('collects only the parents of secrets in the selected environment', () => {
+    const parents = discoveredParents('securus', 'development', classified);
+    expect(parents).toContain('securus/backend/development/database');
+    expect(parents).toContain('securus/backend/development/app');
+    expect(parents.some((parent) => parent.includes('production'))).toBe(false);
+    expect(discoveredParents('empty-project', '*', [])).toEqual(['empty-project']);
+  });
+
+  it('builds viewer rules from discovered paths without write capabilities', () => {
+    const rules = templateRulesFromLayout('viewer', 'securus', 'development', profile, classified);
+    const dataPaths = rules.filter((rule) => rule.path.startsWith('kv/data/securus/backend/development/'));
+    expect(dataPaths.length).toBeGreaterThan(0);
+    expect(dataPaths.every((rule) => rule.path.endsWith('/*'))).toBe(true);
+    expect(dataPaths.every((rule) => rule.capabilities.includes('read'))).toBe(true);
+    expect(rules.some((rule) => rule.capabilities.includes('create'))).toBe(false);
+    expect(rules.some((rule) => rule.capabilities.includes('delete'))).toBe(false);
+    expect(rules.some((rule) => rule.path === 'kv/metadata/securus/')).toBe(true);
+  });
+
+  it('grants writes and TOTP access to the admin template', () => {
+    const rules = templateRulesFromLayout('admin', 'securus', 'development', profile, classified);
+    const dataPaths = rules.filter((rule) => rule.path.startsWith('kv/data/securus/backend/development/'));
+    expect(dataPaths.every((rule) => ['create', 'read', 'update', 'delete'].every((cap) => rule.capabilities.includes(cap)))).toBe(true);
+    expect(rules.some((rule) => rule.path === 'totp/code/securus--*')).toBe(true);
+    expect(rules.some((rule) => rule.path === 'totp/keys/securus--*')).toBe(true);
+    // Trailing wildcard only; no mid-path globs that this build treats literally.
+    expect(rules.every((rule) => !/\*[^*]*\//.test(rule.path))).toBe(true);
+  });
+
+  it('offers simulator presets taken from real paths in one environment', () => {
+    const presets = simulatorPathsFromLayout(profile, 'securus', 'development', classified);
+    expect(presets).toContain('kv/data/securus/backend/development/database/postgres');
+    expect(presets).toContain('kv/data/securus/backend/development/app/config');
+    expect(presets.some((path) => path.includes('production'))).toBe(false);
+    expect(presets).toContain('kv/metadata/securus/');
+    expect(presets).toContain('kv/data/securus/creds/example-console');
+    expect(new Set(presets).size).toBe(presets.length);
+  });
+
+  it('filters and infers policy names that mention the project', () => {
+    const policies = ['default', 'securus-viewer', 'securus-developer', 'securus-admin', 'other-readonly'];
+    expect(projectPolicyNames('securus', policies)).toEqual(['securus-viewer', 'securus-developer', 'securus-admin']);
+    expect(projectPolicyNames('SECURUS', policies)).toHaveLength(3);
+    const names = inferRolePolicyNames('securus', 'development', policies);
+    expect(names.viewer).toBe('securus-viewer');
+    expect(names.developer).toBe('securus-developer');
+    expect(names.admin).toBe('securus-admin');
+    // No env-specific name exists, so it falls back to a role match for any env.
+    expect(inferRolePolicyNames('securus', 'production', policies).viewer).toBe('securus-viewer');
   });
 });

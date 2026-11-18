@@ -1,5 +1,7 @@
 /** Visual policy model. Only ACL paths and capability names — no secret values. */
 
+import type { ClassifiedSecret, LayoutProfile } from './layout';
+
 export interface PolicyRule {
   path: string;
   capabilities: string[];
@@ -53,6 +55,105 @@ export function templateRules(template: RoleTemplateId, project: string, env = '
     rules.push({ path: `totp/keys/${project}--*`, capabilities: ['create', 'read', 'update', 'delete'] });
   }
   return rules.map((rule) => ({ ...rule, capabilities: orderCapabilities(rule.capabilities) }));
+}
+
+/** ACL prefix used to list environments in a discovered layout. */
+export function envListMetadataPath(profile: LayoutProfile, project: string): string {
+  return profile.kind === 'legacy-env'
+    ? `kv/metadata/${project}/env/`
+    : `kv/metadata/${project}/`;
+}
+
+/** Parent folders of discovered secrets, used to build recursive ACL prefixes. */
+export function discoveredParents(project: string, env: string, classified: ClassifiedSecret[]): string[] {
+  const selected = classified.filter((secret) => env === '*' || secret.env === env);
+  if (selected.length === 0) return [project];
+  return [...new Set(selected.map((secret) => {
+    const parent = secret.physical.slice(0, secret.physical.lastIndexOf('/'));
+    return parent || secret.physical;
+  }))];
+}
+
+/**
+ * Template rules built from the server's real KV tree instead of the hardcoded
+ * `<project>/env/<env>` convention. A trailing `*` stays at the very end.
+ */
+export function templateRulesFromLayout(
+  template: RoleTemplateId,
+  project: string,
+  env: string,
+  profile: LayoutProfile,
+  classified: ClassifiedSecret[],
+): PolicyRule[] {
+  const parents = discoveredParents(project, env, classified);
+  const meta = parents.map((parent) => `kv/metadata/${parent}/*`);
+  const data = parents.map((parent) => `kv/data/${parent}/*`);
+  const rules: PolicyRule[] = [
+    { path: envListMetadataPath(profile, project), capabilities: ['list'] },
+    { path: `kv/metadata/${project}/creds/`, capabilities: ['list'] },
+    { path: `kv/data/${project}/creds/*`, capabilities: ['read'] },
+    ...meta.map((path) => ({ path, capabilities: [...ALL_READ] })),
+    ...data.map((path) => ({ path, capabilities: ['read'] })),
+  ];
+
+  if (template === 'developer' || template === 'admin') {
+    for (const path of meta) merge(rules, path, ['create', 'update']);
+    for (const path of data) merge(rules, path, ['create', 'update', 'delete']);
+  }
+  if (template === 'admin') {
+    merge(rules, `kv/data/${project}/creds/*`, ['create', 'update', 'delete']);
+    merge(rules, `kv/metadata/${project}/creds/*`, [...ALL_READ, 'create', 'update', 'delete']);
+    rules.push({ path: `totp/code/${project}--*`, capabilities: ['read'] });
+    rules.push({ path: `totp/keys/${project}--*`, capabilities: ['create', 'read', 'update', 'delete'] });
+  }
+  return rules.map((rule) => ({ ...rule, capabilities: orderCapabilities(rule.capabilities) }));
+}
+
+/** Simulator presets taken from physical paths the server actually returned. */
+export function simulatorPathsFromLayout(
+  profile: LayoutProfile,
+  project: string,
+  env: string,
+  classified: ClassifiedSecret[],
+): string[] {
+  const selected = classified.filter((secret) => env === '*' || secret.env === env).slice(0, 4);
+  const paths = [
+    ...selected.map((secret) => `kv/data/${secret.physical}`),
+    ...selected.slice(0, 2).map((secret) => `kv/metadata/${secret.physical}`),
+    envListMetadataPath(profile, project),
+    `kv/data/${project}/creds/example-console`,
+  ];
+  return [...new Set(paths)];
+}
+
+/** Policy names that actually mention the project, instead of guessed suffixes. */
+export function projectPolicyNames(project: string, policies: string[]): string[] {
+  const needle = project.toLowerCase();
+  return policies.filter((name) => name.toLowerCase().includes(needle));
+}
+
+/** Best-effort mapping from existing policy names to the three role templates. */
+export function inferRolePolicyNames(
+  project: string,
+  env: string,
+  policies: string[],
+): Partial<Record<RoleTemplateId, string>> {
+  const candidates = projectPolicyNames(project, policies);
+  const synonyms: Record<RoleTemplateId, string[]> = {
+    viewer: ['viewer', 'readonly', 'read-only', 'read'],
+    developer: ['developer', 'contributor', 'dev'],
+    admin: ['admin', 'owner', 'lead'],
+  };
+  const result: Partial<Record<RoleTemplateId, string>> = {};
+  for (const role of ROLE_TEMPLATES) {
+    const tokens = synonyms[role.id];
+    result[role.id] = candidates.find((name) => {
+      const lower = name.toLowerCase();
+      return tokens.some((token) => lower.includes(token))
+        && (env === '*' || lower.includes(env.toLowerCase()));
+    }) ?? candidates.find((name) => tokens.some((token) => name.toLowerCase().includes(token)));
+  }
+  return result;
 }
 
 function merge(rules: PolicyRule[], path: string, capabilities: string[]): void {

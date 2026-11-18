@@ -1,7 +1,15 @@
 import { useState } from 'react';
 import { FileCode2, Layers3, Save } from 'lucide-react';
 import { bao } from '@/lib/api';
-import { generateHcl, ROLE_TEMPLATES, templateRules, type PolicyRule, type RoleTemplateId } from '@/lib/policy';
+import type { ClassifiedSecret, LayoutProfile } from '@/lib/layout';
+import {
+  generateHcl,
+  ROLE_TEMPLATES,
+  templateRules,
+  templateRulesFromLayout,
+  type PolicyRule,
+  type RoleTemplateId,
+} from '@/lib/policy';
 import { useToast } from '@/lib/toast';
 import { Badge } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
@@ -12,6 +20,9 @@ interface RoleTemplatesProps {
   env: string;
   canWrite: boolean;
   policies: string[];
+  profile?: LayoutProfile;
+  classified?: ClassifiedSecret[];
+  roleNames?: Partial<Record<RoleTemplateId, string>>;
   onLoadTemplate: (name: string, rules: PolicyRule[], raw?: string) => void;
   onOpenPolicy: (name: string) => void;
   onSaved: () => void;
@@ -21,7 +32,9 @@ function policyName(project: string, env: string, template: RoleTemplateId): str
   return env === '*' ? `${project}-${template}` : `${project}-${env}-${template}`;
 }
 
-export function RoleTemplates({ project, env, canWrite, policies, onLoadTemplate, onOpenPolicy, onSaved }: RoleTemplatesProps) {
+export function RoleTemplates({
+  project, env, canWrite, policies, profile, classified = [], roleNames, onLoadTemplate, onOpenPolicy, onSaved,
+}: RoleTemplatesProps) {
   const { addToast } = useToast();
   const [expanded, setExpanded] = useState<RoleTemplateId | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -49,8 +62,10 @@ export function RoleTemplates({ project, env, canWrite, policies, onLoadTemplate
         </div>
         <div className="panel__body grid role-grid">
           {ROLE_TEMPLATES.map((template) => {
-            const name = policyName(project, env, template.id);
-            const rules = templateRules(template.id, project, env);
+            const name = roleNames?.[template.id] ?? policyName(project, env, template.id);
+            const rules = profile
+              ? templateRulesFromLayout(template.id, project, env, profile, classified)
+              : templateRules(template.id, project, env);
             const exists = policies.includes(name);
             const isOpen = expanded === template.id;
             return (

@@ -26,6 +26,15 @@ export function totpKeyPath(account: string): string {
   return `totp/keys/${account}`;
 }
 
+/** Runbooks are a documented convention outside the project layout resolver. */
+export function runbookMetadataPath(project: string): string {
+  return `${KV_MOUNT}/metadata/_runbooks/${project}`;
+}
+
+export function runbookApiPath(project: string): string {
+  return `${KV_MOUNT}/data/_runbooks/${project}`;
+}
+
 export function parseTotpAccount(account: string): { project: string; account: string } {
   const separator = account.indexOf('--');
   if (separator === -1) return { project: 'other', account };

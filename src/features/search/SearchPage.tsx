@@ -6,7 +6,7 @@ import { bao } from '@/lib/api';
 import { secretApiPath } from '@/lib/baoPaths';
 import { formatWhen } from '@/lib/format';
 import { folderOf, isFavorite, loadFavorites, loadRecent, toggleFavorite, type SecretRef } from '@/lib/navigationMemory';
-import { useProjects } from '@/lib/queries';
+import { fetchLayoutDiscovery, useProjects } from '@/lib/queries';
 import { Badge } from '@/components/common/Badge';
 import { EmptyState, EnvBadge } from '@/components/common/Extras';
 
@@ -25,28 +25,26 @@ export function SearchPage() {
 
   useEffect(() => setInput(search.q ?? ''), [search.q]);
 
-  const envQueries = useQueries({
+  // Use the same discovery/resolver as the Secrets page. Probing `<project>/env/`
+  // directly produced 22 404s and indexed only one layout on this server.
+  const discoveryQueries = useQueries({
     queries: (projects.data ?? []).map((project) => ({
-      queryKey: ['environments', project],
-      queryFn: () => bao.listEnvironments(project),
+      queryKey: ['layout-discovery', project],
+      queryFn: () => fetchLayoutDiscovery(project),
       retry: false,
-      staleTime: 60_000,
+      staleTime: 120_000,
     })),
   });
-  const pairs = (projects.data ?? []).flatMap((project, index) =>
-    (envQueries[index]?.data ?? []).map((env) => ({ project, env })),
-  );
-  const pathQueries = useQueries({
-    queries: pairs.map(({ project, env }) => ({
-      queryKey: ['secret-paths', project, env],
-      queryFn: () => bao.listSecretPaths(project, env),
-      retry: false,
-      staleTime: 30_000,
-    })),
+  const pairs = (projects.data ?? []).flatMap((project, index) => {
+    const seen = new Set<string>();
+    return (discoveryQueries[index]?.data?.classified ?? []).flatMap((secret) => {
+      const key = `${secret.env}\0${secret.logical}`;
+      if (!secret.logical || seen.has(key)) return [];
+      seen.add(key);
+      return [{ project, env: secret.env, path: secret.logical }];
+    });
   });
-  const targets = pairs.flatMap((pair, index) =>
-    (pathQueries[index]?.data ?? []).map((path) => ({ ...pair, path })),
-  ).slice(0, MAX_SECRETS);
+  const targets = pairs.slice(0, MAX_SECRETS);
   const secretQueries = useQueries({
     queries: targets.map(({ project, env, path }) => ({
       queryKey: ['secret', project, env, path, 'search'],
@@ -69,7 +67,9 @@ export function SearchPage() {
   const results = query
     ? allHits.filter((hit) => [hit.title, hit.project, hit.env, hit.path, hit.key ?? ''].join(' ').toLowerCase().includes(query)).slice(0, 60)
     : allHits.filter((hit) => !hit.key).slice(0, 20);
-  const isLoading = projects.isLoading || envQueries.some((q) => q.isLoading) || pathQueries.some((q) => q.isLoading);
+  const isLoading = projects.isLoading
+    || discoveryQueries.some((q) => q.isLoading)
+    || secretQueries.some((q) => q.isLoading);
 
   function onFavorite(hit: Omit<SecretRef, 'visitedAt'>) {
     setFavorites(toggleFavorite({
@@ -134,10 +134,10 @@ export function SearchPage() {
         />
       </div>
 
-      {isLoading && <div className="state"><div className="spinner" /><p>Indexing readable secrets…</p></div>}
+      {isLoading && <div className="state" data-testid="search-loading"><div className="spinner" /><p>Indexing readable secrets…</p></div>}
 
       {query && (
-        <div className="panel">
+        <div className="panel" data-testid="search-results">
           <div className="panel__head"><Search size={17} /><h3>Results</h3><Badge size="small">{results.length}</Badge></div>
           <div className="panel__body">
             {results.length === 0 && !isLoading && <EmptyState title="No matches">Try a field name, a folder, or a project name.</EmptyState>}
@@ -172,8 +172,8 @@ export function SearchPage() {
         </>
       )}
 
-      <p className="small muted">
-        Searches readable values' field names only. Secret values are never indexed into the browser or URLs.
+      <p className="small muted" data-testid="search-index-note">
+        Field names require a temporary KV read of each secret; values are not displayed, logged or persisted.
         {targets.length >= MAX_SECRETS && ` Showing the first ${MAX_SECRETS} secrets.`}
       </p>
     </div>

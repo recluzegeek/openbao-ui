@@ -3,6 +3,8 @@ import { bao } from './api';
 import {
   envMetadataPath,
   metadataPath,
+  runbookApiPath,
+  runbookMetadataPath,
   secretApiPath,
   secretPath,
   totpCodePath,
@@ -10,6 +12,7 @@ import {
 } from './baoPaths';
 import { environmentMarkerPath, ENVIRONMENT_MARKER, inferLayout, type ClassifiedSecret, type LayoutProfile } from './layout';
 import { registerProjectLayout } from './layoutResolver';
+import { deriveSetupStage } from './setup';
 
 const METADATA_SAMPLE = 80;
 
@@ -54,33 +57,36 @@ export interface LayoutDiscovery {
  * the logical layout. When inference cannot classify a path it is still
  * returned in rawPaths and the reason is logged at warning level by inferLayout.
  */
+/** Shared by the Secrets page and Search so every feature uses one resolver. */
+export async function fetchLayoutDiscovery(project: string): Promise<LayoutDiscovery> {
+  const allPaths = await bao.listRecursive(`${project}/`);
+  const isMarker = (path: string) => path.slice(path.lastIndexOf('/') + 1) === ENVIRONMENT_MARKER;
+  const markers = allPaths.filter(isMarker);
+  const rawPaths = allPaths.filter((path) => !isMarker(path));
+  const metadataByPath: Record<string, Record<string, string>> = {};
+  // Markers carry the environment metadata, so sample them before secrets.
+  for (const path of [...markers, ...rawPaths].slice(0, METADATA_SAMPLE)) {
+    try {
+      const meta = await bao.readMetadata(path);
+      if (meta.data.custom_metadata) metadataByPath[path] = meta.data.custom_metadata;
+    } catch {
+      // Metadata may be unreadable for this token; heuristics still apply.
+    }
+  }
+  const result = inferLayout(allPaths, metadataByPath);
+  const classified = result.classified.filter((secret) => !isMarker(secret.physical));
+  const environments = [...new Set(result.classified.map((secret) => secret.env))];
+  registerProjectLayout(project, result.profile, classified);
+  return { ...result, classified, environments, rawPaths, markers };
+}
+
 export function useLayoutDiscovery(project?: string) {
   return useQuery<LayoutDiscovery>({
     queryKey: ['layout-discovery', project],
     enabled: Boolean(project),
     staleTime: 120_000,
     retry: false,
-    queryFn: async () => {
-      const allPaths = await bao.listRecursive(`${project!}/`);
-      const isMarker = (path: string) => path.slice(path.lastIndexOf('/') + 1) === ENVIRONMENT_MARKER;
-      const markers = allPaths.filter(isMarker);
-      const rawPaths = allPaths.filter((path) => !isMarker(path));
-      const metadataByPath: Record<string, Record<string, string>> = {};
-      // Markers carry the environment metadata, so sample them before secrets.
-      for (const path of [...markers, ...rawPaths].slice(0, METADATA_SAMPLE)) {
-        try {
-          const meta = await bao.readMetadata(path);
-          if (meta.data.custom_metadata) metadataByPath[path] = meta.data.custom_metadata;
-        } catch {
-          // Metadata may be unreadable for this token; heuristics still apply.
-        }
-      }
-      const result = inferLayout(allPaths, metadataByPath);
-      const classified = result.classified.filter((secret) => !isMarker(secret.physical));
-      const environments = [...new Set(result.classified.map((secret) => secret.env))];
-      registerProjectLayout(project!, result.profile, classified);
-      return { ...result, classified, environments, rawPaths, markers };
-    },
+    queryFn: () => fetchLayoutDiscovery(project!),
   });
 }
 
@@ -117,6 +123,21 @@ export function useSetupSeal() {
 
 export function useKvMount() {
   return useQuery({ queryKey: ['setup-kv-mount'], queryFn: () => bao.hasKvMount(), retry: false, staleTime: 60_000 });
+}
+
+/** One derived setup stage so the guide, banner and sidebar agree. */
+export function useSetupStage() {
+  const health = useSetupHealth();
+  const seal = useSetupSeal();
+  const kv = useKvMount();
+  const projects = useProjects();
+  return deriveSetupStage({
+    health: health.data,
+    healthFailed: health.isError,
+    seal: seal.data,
+    kvMounted: kv.data,
+    projects: projects.data,
+  });
 }
 
 export function useServices(project?: string, env?: string) {
@@ -265,7 +286,7 @@ export function capabilityPathsForFolder(
 export function runbookCapabilityPaths(projects: string[]) {
   return [
     'kv/metadata/_runbooks/',
-    ...projects.map((project) => `kv/data/_runbooks/${project}`),
+    ...projects.flatMap((project) => [runbookApiPath(project), runbookMetadataPath(project)]),
   ];
 }
 

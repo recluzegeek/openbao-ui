@@ -1,4 +1,5 @@
 import type { AuditResponse } from './audit';
+import { runbookApiPath } from './baoPaths';
 
 const KEYS = {
   address: 'console.bao.address',
@@ -357,7 +358,7 @@ export const bao = {
     const res = await bao.list('kv/metadata/_runbooks/');
     return cleanKeys(res.data?.keys).map((k) => k.replace(/\/$/, ''));
   },
-  readRunbook: (project: string) => bao.readSecret(`_runbooks/${encodeURIComponent(project)}`),
+  readRunbook: (project: string) => request<KVResponse>(runbookApiPath(project)),
   readSecret: (path: string, version?: number) =>
     request<KVResponse>(`kv/data/${path}`, version ? { params: { version: String(version) } } : {}),
   readMetadata: (path: string) => request<KVMetadataResponse>(`kv/metadata/${path}`),

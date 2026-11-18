@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactElement } from 'react';
-import { AlertTriangle, Layers, Plus } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Layers, Plus } from 'lucide-react';
 import { bao } from '@/lib/api';
 import { can, deniedReason } from '@/lib/capabilities';
 import { environmentCreationTarget, useCapabilities, type LayoutDiscovery } from '@/lib/queries';
@@ -15,6 +15,19 @@ interface MetadataRow {
   value: string;
 }
 
+/** Collapses per-path heuristics into a few human-readable categories. */
+function groupWarnings(warnings: string[]) {
+  const groups = new Map<string, string[]>();
+  for (const warning of warnings) {
+    let label = 'A few paths need a closer look';
+    if (/disagrees/i.test(warning)) label = 'Server labels overrode path names';
+    else if (/environment-like/i.test(warning)) label = 'Some paths had no environment label';
+    else if (/secret name/i.test(warning)) label = 'A few paths had no secret name';
+    groups.set(label, [...(groups.get(label) ?? []), warning]);
+  }
+  return [...groups].map(([label, items]) => ({ label, count: items.length, examples: items.slice(0, 2) }));
+}
+
 /** Surfaces what the server actually returned and lets privileged users add an environment. */
 export function LayoutDiscoveryPanel({ project, discovery, error }: {
   project?: string;
@@ -24,6 +37,7 @@ export function LayoutDiscoveryPanel({ project, discovery, error }: {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
   const [open, setOpen] = useState(false);
+  const [showIssues, setShowIssues] = useState(false);
   const [name, setName] = useState('');
   const [rows, setRows] = useState<MetadataRow[]>([
     { id: 1, key: 'ui_env', value: '' },
@@ -48,6 +62,8 @@ export function LayoutDiscoveryPanel({ project, discovery, error }: {
     for (const secret of discovery?.classified ?? []) result[secret.source] += 1;
     return result;
   }, [discovery]);
+
+  const warningGroups = useMemo(() => groupWarnings(discovery?.warnings ?? []), [discovery]);
 
   async function createEnvironment(): Promise<void> {
     if (!target) return;
@@ -75,7 +91,7 @@ export function LayoutDiscoveryPanel({ project, discovery, error }: {
   if (error) {
     return (
       <div className="notice warning small" data-testid="layout-discovery-error">
-        Layout discovery could not read this project’s KV tree. The legacy path layout is used as a fallback.
+        Using the built-in path fallback until discovery succeeds.
         {' '}{error instanceof Error ? error.message : 'Server listing failed.'}
       </div>
     );
@@ -107,20 +123,34 @@ export function LayoutDiscoveryPanel({ project, discovery, error }: {
       <div className="panel__body" style={{ display: 'grid', gap: '0.5rem' }}>
         <p className="small muted">{discovery.profile.description}. Discovered {discovery.rawPaths.length} paths on the server.</p>
         <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-          <Badge size="small" variant="info">{counts.metadata} from metadata</Badge>
-          <Badge size="small" variant="info">{counts.heuristic} inferred</Badge>
-          <Badge size="small" variant="outline">{counts.raw} raw</Badge>
+          <Badge size="small" variant="info">{counts.metadata} labelled by server</Badge>
+          <Badge size="small" variant="info">{counts.heuristic} recognised from paths</Badge>
+          <Badge size="small" variant="outline">{counts.raw} other</Badge>
         </div>
-        {discovery.warnings.length > 0 && (
+        {warningGroups.length > 0 && (
           <div className="notice warning small" data-testid="layout-warnings">
-            <AlertTriangle size={14} />
-            <div>
-              <strong>{discovery.warnings.length} heuristic warning{discovery.warnings.length === 1 ? '' : 's'}</strong>
-              <ul style={{ margin: '0.4rem 0 0', paddingLeft: '1.1rem' }}>
-                {discovery.warnings.slice(0, 4).map((warning) => <li key={warning}>{warning}</li>)}
-              </ul>
-              {discovery.warnings.length > 4 && <span className="muted">+{discovery.warnings.length - 4} more in the browser console.</span>}
-            </div>
+            <button
+              type="button"
+              className="layout-issues-chip"
+              data-testid="layout-issues-chip"
+              aria-expanded={showIssues}
+              onClick={() => setShowIssues((value) => !value)}
+            >
+              <AlertTriangle size={14} />
+              {discovery.warnings.length} layout issue{discovery.warnings.length === 1 ? '' : 's'}
+              <ChevronDown size={13} className={showIssues ? 'rotate' : ''} />
+            </button>
+            {showIssues && (
+              <div data-testid="layout-issues-detail" style={{ marginTop: '0.4rem' }}>
+                {warningGroups.map((group) => (
+                  <p key={group.label} style={{ margin: '0.25rem 0' }}>
+                    <strong>{group.label}</strong> ({group.count})
+                    <span className="muted mono"> — {group.examples.join('; ')}</span>
+                  </p>
+                ))}
+                <span className="muted">Full diagnostics stay in the browser console.</span>
+              </div>
+            )}
           </div>
         )}
       </div>

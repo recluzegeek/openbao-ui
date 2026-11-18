@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { ArrowRight, Sparkles, X } from 'lucide-react';
+import { useSetupStage } from '@/lib/queries';
 import { dismissOnboarding, isOnboardingDismissed } from '@/lib/setup';
 import { Button } from '@/components/common/Button';
 
 /** First-run hint that points at the getting-started guide; dismiss is remembered locally. */
 export function OnboardingBanner() {
   const navigate = useNavigate();
+  const stage = useSetupStage();
   const [visible, setVisible] = useState(() => !isOnboardingDismissed());
-  if (!visible) return null;
+  if (!visible || stage === 'ready') return null;
 
   return (
     <div className="onboarding-banner" role="note" data-testid="onboarding-banner">
