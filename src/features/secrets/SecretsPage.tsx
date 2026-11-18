@@ -3,7 +3,6 @@ import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowRightLeft,
-  BookOpen,
   ChevronRight,
   ClipboardPaste,
   Columns3,
@@ -18,11 +17,11 @@ import {
   Link2,
   Lock,
   MessageSquareText,
+  MoreHorizontal,
   Pencil,
   Plus,
   Search,
   Tag,
-  TerminalSquare,
   Upload,
   UserRound,
 } from 'lucide-react';
@@ -42,6 +41,7 @@ import {
   type SecretAnnotations,
 } from '@/lib/secretMetadata';
 import { buildSecretTree, folderBreadcrumbs, folderInTree, secretName, validSecretPath, type SecretTreeFolder } from '@/lib/secretTree';
+import { environmentTabs, groupFieldsByPrefix } from '@/lib/secretGroups';
 import { useAuth } from '@/lib/auth';
 import {
   capabilityPathsForFolder,
@@ -69,14 +69,23 @@ import { VersionHistoryPanel } from './VersionHistoryPanel';
 
 type Search = Record<string, string | undefined>;
 
-function SecretField({ name, value, comment, override, resolved }: {
+function SecretField({ name, value, comment, override, resolved, resetKey }: {
   name: string;
   value: unknown;
   comment?: string;
   override?: string;
   resolved?: string;
+  /** Changing secret/version re-masks everything, so values never stay open across navigation. */
+  resetKey?: string;
 }) {
   const [revealed, setRevealed] = useState(false);
+  useEffect(() => { setRevealed(false); }, [resetKey]);
+  // A revealed value re-masks on its own; nothing stays on screen indefinitely.
+  useEffect(() => {
+    if (!revealed) return;
+    const timer = window.setTimeout(() => setRevealed(false), 30_000);
+    return () => window.clearTimeout(timer);
+  }, [revealed]);
   const overridden = override !== undefined;
   const actual = effectiveValue(name, value, overridden ? { [name]: override! } : {});
   const display = revealed ? actual : mask(value);
@@ -223,6 +232,7 @@ export function SecretsPage() {
   const [tab, setTab] = useState<'env' | 'creds'>('env');
   const [version, setVersion] = useState<number | undefined>(undefined);
   const [promoteTo, setPromoteTo] = useState<string | null>(null);
+  const [confirmCopyEnv, setConfirmCopyEnv] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
   const [editor, setEditor] = useState<{
     mode: 'create' | 'edit';
@@ -299,6 +309,12 @@ export function SecretsPage() {
   const referenceLookup = useMemo(() => buildReferenceLookup(
     allPaths.flatMap((path, index) => refQueries[index]?.data ? [{ path, data: refQueries[index].data!.data.data }] : []),
   ), [allPaths, refQueries]);
+  // refQueries already reads each secret in this environment, so field names
+  // for filtering come for free — no extra KV reads just to power the filter.
+  const fieldNamesByPath = useMemo(() => Object.fromEntries(allPaths.map((path, index) => [
+    path,
+    Object.keys(refQueries[index]?.data?.data?.data ?? {}),
+  ])), [allPaths, refQueries]);
   const annotations = useMemo(() => parseAnnotations(metadataQ.data?.data.custom_metadata), [metadataQ.data]);
   const myOverrides = useMemo(() => overridesFor(annotations, identityName), [annotations, identityName]);
 
@@ -312,8 +328,19 @@ export function SecretsPage() {
   const canWriteMeta = can(caps, metaWritePath, 'update') ||
     Boolean(probe && can(caps, `kv/metadata/${probe}`, 'create'));
   const folderNode = folderInTree(tree, folder) ?? tree;
-  const filteredSecrets = folderNode.secrets.filter((path) => secretName(path).toLowerCase().includes(filter.toLowerCase()));
+  const filterText = filter.trim().toLowerCase();
+  const filteredSecrets = folderNode.secrets.filter((path) => {
+    if (!filterText) return true;
+    return secretName(path).toLowerCase().includes(filterText)
+      || (fieldNamesByPath[path] ?? []).some((name) => name.toLowerCase().includes(filterText));
+  });
   const crumbs = folderBreadcrumbs(folder);
+  const envView = environmentTabs(envs, env);
+  const fieldGroups = useMemo(
+    () => groupFieldsByPrefix(secretQ.data?.data.data ?? {}),
+    [secretQ.data],
+  );
+  const resetKey = `${project ?? ''}/${env ?? ''}/${service ?? ''}/${version ?? 'latest'}`;
 
   function updateRow(id: string, patch: Partial<FieldRow>) {
     setEditor((current) => {
@@ -557,24 +584,7 @@ export function SecretsPage() {
     <div className="grid" style={{ gap: '1.1rem' }}>
       <OnboardingBanner />
       <div className="page__header">
-        <div>
-          <h2>Environment-aware secrets</h2>
-          <p>Pick a project and environment. Values are masked until you ask to see them.</p>
-        </div>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <Button variant={showCompare ? 'primary' : 'outlined'} size="small" icon={<Columns3 size={15} />} onClick={() => setShowCompare((value) => !value)} disabled={!service}>
-            Compare envs
-          </Button>
-          <Button variant="outlined" size="small" icon={<BookOpen size={15} />} onClick={() => void navigate({ to: '/runbooks', search: { project: project ?? undefined } })}>
-            Runbook
-          </Button>
-          <Button variant="outlined" size="small" icon={<FileJson size={15} />} onClick={() => setTab('creds')}>
-            Shared credentials
-          </Button>
-          <Button variant="outlined" size="small" icon={<TerminalSquare size={15} />} onClick={() => void navigate({ to: '/automation', search: { path: apiPath || undefined } })}>
-            For agents
-          </Button>
-        </div>
+        <h2>Secrets</h2>
       </div>
 
       <div className="control-bar">
@@ -587,21 +597,35 @@ export function SecretsPage() {
         </div>
         <div className="field" style={{ flex: 1 }}>
           <label>Environment</label>
-          <div className="env-switch" role="group" aria-label="Environment">
-            {envs.map((name) => {
-              const allowed = can(caps, project ? envMetadataPath(project, name) : '', 'list');
-              return (
-                <button
-                  key={name}
-                  aria-pressed={env === name}
-                  onClick={() => { setEnv(name); setService(undefined); setVersion(undefined); }}
-                  title={allowed ? `Browse ${name}` : 'Your token cannot list this environment'}
+          {envs.length <= 1 ? (
+            <div className="env-label" aria-label="Environment">{envs[0] ?? '—'}</div>
+          ) : (
+            <div className="env-tabs" role="group" aria-label="Environment">
+              {envView.tabs.map((name) => {
+                const allowed = can(caps, project ? envMetadataPath(project, name) : '', 'list');
+                return (
+                  <button
+                    key={name}
+                    aria-pressed={env === name}
+                    onClick={() => { setEnv(name); setService(undefined); setVersion(undefined); }}
+                    title={allowed ? `Browse ${name}` : 'Your token cannot list this environment'}
+                  >
+                    {name}
+                  </button>
+                );
+              })}
+              {envView.more.length > 0 && (
+                <select
+                  aria-label="More environments"
+                  value={env && envView.more.includes(env) ? env : ''}
+                  onChange={(event) => { if (event.target.value) { setEnv(event.target.value); setService(undefined); setVersion(undefined); } }}
                 >
-                  {name}
-                </button>
-              );
-            })}
-          </div>
+                  <option value="">+{envView.more.length} more</option>
+                  {envView.more.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+              )}
+            </div>
+          )}
         </div>
         <div className="search">
           <Search size={16} aria-hidden="true" />
@@ -683,15 +707,47 @@ export function SecretsPage() {
             {showCompare && service && project && (
               <CompareEnvsPanel project={project} path={service} envs={envs} />
             )}
-            <div className="panel">
-              <div className="panel__head">
+            <div className="panel secret-detail">
+              <div className="panel__head secret-detail__head">
                 <KeyRound size={17} />
                 <h3>{service ? secretName(service) : 'Select a secret'}</h3>
                 {env && <EnvBadge env={env} />}
                 {version !== undefined && <Badge variant="info" size="small">v{version}</Badge>}
                 {!writable && currentPath && <Badge variant="outline" size="small"><Lock size={12} /> read-only</Badge>}
+                <Button
+                  size="small"
+                  variant={showCompare ? 'primary' : 'ghost'}
+                  icon={<Columns3 size={15} />}
+                  onClick={() => setShowCompare((value) => !value)}
+                  disabled={!service}
+                  title="Compare this field set across environments"
+                >
+                  Compare
+                </Button>
+                <Button size="small" icon={<Pencil size={15} />} onClick={() => void openEdit()} disabled={!writable || !service} data-testid="edit-secret">
+                  Edit
+                </Button>
+                <details className="action-menu">
+                  <summary className="btn btn--small btn--outlined" aria-label="More secret actions" title="More actions">
+                    <MoreHorizontal size={16} />
+                  </summary>
+                  <div className="action-menu__items">
+                    <button onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); setConfirmCopyEnv(true); }} disabled={!secretQ.data}>
+                      <FileJson size={14} /> Copy .env
+                    </button>
+                    <button onClick={() => void (async () => { await openEdit(); setDialog('import'); })} disabled={!writable || !service}>
+                      <Upload size={14} /> Import values…
+                    </button>
+                    <button onClick={() => void (async () => { await openEdit(); setDialog('export'); })} disabled={!service}>
+                      <Download size={14} /> Export values…
+                    </button>
+                    <button onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); setPromoteTo(envs.find((name) => name !== env) ?? null); }} disabled={!writable || envs.length < 2}>
+                      <ArrowRightLeft size={14} /> Promote to…
+                    </button>
+                  </div>
+                </details>
               </div>
-              <div className="panel__body">
+              <div className="panel__body secret-detail__body">
                 {service && (
                   <nav className="breadcrumbs" aria-label="Secret location">
                     <span className="mono">{project}</span>
@@ -718,20 +774,31 @@ export function SecretsPage() {
                         {annotations.note && <span className="small muted"><MessageSquareText size={12} /> {annotations.note}</span>}
                       </div>
                     )}
-                    {Object.entries(secretQ.data.data.data).length === 0 && <EmptyState title="Empty secret">This secret has no fields yet.</EmptyState>}
-                    {Object.entries(secretQ.data.data.data).map(([key, value]) => {
-                      const refs = findReferences(String(value ?? ''));
-                      return (
-                        <SecretField
-                          key={key}
-                          name={key}
-                          value={value}
-                          comment={annotations.comments[key]}
-                          override={Object.prototype.hasOwnProperty.call(myOverrides, key) ? myOverrides[key] : undefined}
-                          resolved={refs.length > 0 ? resolveReferences(String(value ?? ''), referenceLookup) : undefined}
-                        />
-                      );
-                    })}
+                    {fieldGroups.length === 0 && <EmptyState title="Empty secret">This secret has no fields yet.</EmptyState>}
+                    {fieldGroups.map((group) => (
+                      <details key={group.id} className="field-group" data-testid={`field-group-${group.id}`}>
+                        <summary>
+                          <span>{group.label}</span>
+                          <Badge size="small">{group.fields.length}</Badge>
+                        </summary>
+                        <div className="field-group__fields">
+                          {group.fields.map(([key, value]) => {
+                            const refs = findReferences(String(value ?? ''));
+                            return (
+                              <SecretField
+                                key={key}
+                                name={key}
+                                value={value}
+                                comment={annotations.comments[key]}
+                                override={Object.prototype.hasOwnProperty.call(myOverrides, key) ? myOverrides[key] : undefined}
+                                resolved={refs.length > 0 ? resolveReferences(String(value ?? ''), referenceLookup) : undefined}
+                                resetKey={resetKey}
+                              />
+                            );
+                          })}
+                        </div>
+                      </details>
+                    ))}
                     <div className="divider" />
                     <div className="meta-row">
                       <span>Version {secretQ.data.data.metadata.version}</span>
@@ -743,20 +810,6 @@ export function SecretsPage() {
                           <span>Rotation: {secretQ.data.data.metadata.custom_metadata.rotation_notes}</span>
                         </>
                       )}
-                    </div>
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '1rem' }}>
-                      <Button size="small" icon={<Pencil size={15} />} onClick={() => void openEdit()} disabled={!writable}>
-                        Edit
-                      </Button>
-                      <Button size="small" variant="outlined" icon={<FileJson size={15} />} onClick={() => void copy(envFile(secretQ.data!.data.data), 'Shell-safe .env copied')}>
-                        Copy .env
-                      </Button>
-                      <Button size="small" variant="outlined" icon={<Upload size={15} />} onClick={() => void openEdit()} disabled={!writable}>
-                        Import
-                      </Button>
-                      <Button size="small" variant="outlined" icon={<ArrowRightLeft size={15} />} onClick={() => setPromoteTo(envs.find((name) => name !== env) ?? null)} disabled={!writable || envs.length < 2}>
-                        Promote to…
-                      </Button>
                     </div>
                   </>
                 )}
@@ -778,6 +831,33 @@ export function SecretsPage() {
             <RecentActivityPanel path={apiPath || undefined} />
           </div>
         </div>
+      )}
+
+      {confirmCopyEnv && secretQ.data && service && (
+        <Dialog
+          title="Copy real values to the clipboard?"
+          onClose={() => setConfirmCopyEnv(false)}
+          footer={
+            <>
+              <Button variant="outlined" onClick={() => setConfirmCopyEnv(false)}>Cancel</Button>
+              <Button
+                icon={<FileJson size={15} />}
+                onClick={() => {
+                  void copy(envFile(secretQ.data!.data.data), 'Shell-safe .env copied');
+                  setConfirmCopyEnv(false);
+                }}
+              >
+                Copy .env
+              </Button>
+            </>
+          }
+        >
+          <p className="small muted">
+            This places the unmasked values for <span className="mono">{secretPath(project!, env!, service)}</span> on your clipboard.
+            Anything on the clipboard can be pasted into chat, tickets or terminals by any app you use.
+          </p>
+          <div className="notice warning small">The values are not logged or stored by the console, but they will leave the masked view.</div>
+        </Dialog>
       )}
 
       {promoteTo && project && env && service && secretQ.data && (

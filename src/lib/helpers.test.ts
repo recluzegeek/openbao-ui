@@ -11,6 +11,7 @@ import { environmentMarkerPath, inferLayout, physicalPath, type ClassifiedSecret
 import { clearProjectLayouts, registerProjectLayout, resolveApiPath, resolveEnvMetadataPath, toLogicalPath } from './layoutResolver';
 import { actorLabel, auditCsv, auditPathHref, filterAuditEntries, operationLabel, type AuditEntry, type AuditFilters } from './audit';
 import { buildSecretTree, folderBreadcrumbs, folderInTree, validSecretPath } from './secretTree';
+import { environmentTabs, groupFieldsByPrefix } from './secretGroups';
 import { buildReferenceLookup, findReferences, parseKeyValueText, resolveReferences, serializeKeyValue } from './secretFormats';
 import { effectiveValue, mergeAnnotations, overridesFor, parseAnnotations, withOverridesFor } from './secretMetadata';
 import { actorForVersion, diffData } from './secretDiff';
@@ -717,5 +718,42 @@ describe('layout-derived policy helpers', () => {
     expect(names.admin).toBe('securus-admin');
     // No env-specific name exists, so it falls back to a role match for any env.
     expect(inferRolePolicyNames('securus', 'production', policies).viewer).toBe('securus-viewer');
+  });
+});
+
+describe('secrets presentation', () => {
+  it('groups field names by prefix and folds singletons into Other', () => {
+    const groups = groupFieldsByPrefix({
+      AWS_ACCESS_KEY_ID: 'a',
+      AWS_SECRET_ACCESS_KEY: 'b',
+      JWT_SECRET: 'c',
+      JWT_EXPIRY: 'd',
+      DATABASE_URL: 'e',
+      username: 'f',
+    });
+    expect(groups.map((group) => group.label)).toEqual(['AWS', 'JWT', 'Other']);
+    expect(groups[0].fields.map(([name]) => name)).toEqual(['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY']);
+    expect(groups[2].fields.map(([name]) => name)).toEqual(['DATABASE_URL', 'username']);
+    // No field is lost: every input name appears exactly once across groups.
+    expect(groups.flatMap((group) => group.fields.map(([name]) => name)).sort()).toEqual([
+      'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'DATABASE_URL', 'JWT_EXPIRY', 'JWT_SECRET', 'username',
+    ]);
+  });
+
+  it('does not create a group for a lone prefixed field', () => {
+    const groups = groupFieldsByPrefix({ AWS_KEY: 'a', OTHER: 'b' });
+    expect(groups).toHaveLength(1);
+    expect(groups[0].label).toBe('Other');
+    expect(groups[0].fields).toHaveLength(2);
+  });
+
+  it('keeps the selected environment visible when tabs overflow', () => {
+    const envs = ['development', 'staging', 'production', 'qa', 'preview', 'local'];
+    expect(environmentTabs(envs, 'production')).toEqual({
+      tabs: ['production', 'development', 'staging', 'qa'],
+      more: ['preview', 'local'],
+    });
+    expect(environmentTabs(envs, undefined, 2).tabs).toEqual(['development', 'staging']);
+    expect(environmentTabs(['only'])).toEqual({ tabs: ['only'], more: [] });
   });
 });
