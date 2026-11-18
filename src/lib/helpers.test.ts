@@ -3,7 +3,7 @@ import { can, canAny, deniedReason } from './capabilities';
 import { envRank, parseTotpAccount, runbookApiPath, runbookMetadataPath, secretPath, totpCodePath } from './baoPaths';
 import { envFile, formatTtl, parsePeriod, secondsUntil, shellQuote, tokenTtlLabel } from './format';
 import { baoCliSnippet, curlSnippet, envPullSnippet } from './snippets';
-import { dataFromRows, fieldNameError, rowsFromData, validSecretName, validateRows } from './secretForm';
+import { countFieldChanges, dataFromRows, fieldNameError, rowsFromData, validSecretName, validateRows } from './secretForm';
 import { bao, normalizeNamespace, request, setBaoConfig } from './api';
 import { mergeEffectivePolicies } from './auth';
 import { sessionSecondsLeft } from './session';
@@ -17,7 +17,8 @@ import { buildSecretTree, folderBreadcrumbs, folderInTree, validSecretPath } fro
 import { environmentTabs, groupFieldsByPrefix } from './secretGroups';
 import { buildReferenceLookup, findReferences, parseKeyValueText, resolveReferences, serializeKeyValue } from './secretFormats';
 import { effectiveValue, mergeAnnotations, overridesFor, parseAnnotations, withOverridesFor } from './secretMetadata';
-import { actorForVersion, diffData } from './secretDiff';
+import { actorForVersion, diffData, otherVersion } from './secretDiff';
+import { promotionPreview, promotionSummary } from './promotion';
 import { deletedVersions, durationError, versionSettingsFrom, versionState } from './secretLifecycle';
 import { isFavorite, loadFavorites, loadRecent, pushRecent, secretHref, toggleFavorite } from './navigationMemory';
 import {
@@ -1085,5 +1086,64 @@ describe('KV mount picker protocol (v1/v2)', () => {
     expect(envPullSnippet('app', v1)).toContain(".data |");
     // Defaults preserved for existing v2 callers.
     expect(baoCliSnippet('roomsss/env/development/app')).toBe('bao kv get -mount=kv -format=json roomsss/env/development/app');
+  });
+});
+
+describe('promotion preview (what a full-data write changes)', () => {
+  it('classifies added, overwritten, unchanged and removed fields', () => {
+    const preview = promotionPreview(
+      { API_URL: 'new', LEVEL: 'info', SHARED: 'same' },
+      { API_URL: 'old', DEBUG_EXTRA: 'true', SHARED: 'same' },
+    );
+    expect(preview).toEqual({
+      added: ['LEVEL'],
+      overwritten: ['API_URL'],
+      unchanged: ['SHARED'],
+      removed: ['DEBUG_EXTRA'],
+    });
+  });
+
+  it('treats a missing target as a pure create', () => {
+    const preview = promotionPreview({ A: '1', B: '2' }, {});
+    expect(preview.added).toEqual(['A', 'B']);
+    expect(preview.removed).toEqual([]);
+    expect(preview.overwritten).toEqual([]);
+  });
+
+  it('treats identical payloads as no change', () => {
+    const preview = promotionPreview({ A: '1' }, { A: '1' });
+    expect(promotionSummary(preview)).toBe('1 unchanged');
+    expect(preview.removed).toEqual([]);
+  });
+
+  it('does not mistake an undefined value for a missing key', () => {
+    expect(promotionPreview({ A: undefined }, { A: '' }).unchanged).toEqual(['A']);
+  });
+
+  it('summarizes the destructive part first', () => {
+    const preview = promotionPreview(
+      { A: '1', B: '2' },
+      { A: '0', DEBUG_EXTRA: 'x' },
+    );
+    expect(promotionSummary(preview)).toBe('1 overwritten · 1 added · 1 removed');
+  });
+});
+
+describe('version A/B comparison selection', () => {
+  it('picks a different version so a diff never collapses to v2 → v2', () => {
+    expect(otherVersion([4, 3, 2, 1], 4)).toBe(3);
+    expect(otherVersion([4, 3, 2, 1], 2)).toBe(1);
+    expect(otherVersion([4, 3, 2, 1], 1)).toBe(2);
+    expect(otherVersion([2], 2)).toBeUndefined();
+    expect(otherVersion([], 2)).toBeUndefined();
+  });
+});
+
+describe('editor change count', () => {
+  it('counts changed, added and removed fields', () => {
+    expect(countFieldChanges({ A: '1', B: '2' }, { A: '1', B: '3', C: '4' })).toBe(2);
+    expect(countFieldChanges({ A: '1' }, {})).toBe(1);
+    expect(countFieldChanges({}, { A: '1' })).toBe(1);
+    expect(countFieldChanges({ A: '1' }, { A: '1' })).toBe(0);
   });
 });

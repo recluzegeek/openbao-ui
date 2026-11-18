@@ -32,6 +32,17 @@ export function diffData(left: Record<string, unknown>, right: Record<string, un
   });
 }
 
+/**
+ * Pick a different version for the other side of a comparison. Versions arrive
+ * newest-first, so prefer the next older one, then fall back to a newer one.
+ */
+export function otherVersion(versions: number[], chosen: number): number | undefined {
+  const index = versions.indexOf(chosen);
+  if (index === -1) return versions.find((version) => version !== chosen);
+  return versions.slice(index + 1).find((version) => version !== chosen)
+    ?? versions.slice(0, index).reverse().find((version) => version !== chosen);
+}
+
 /** Attribute a KV version timestamp to the closest matching audit entry. */
 export function actorForVersion(entries: AuditEntry[], createdTime: string, toleranceMs = 180_000): string | undefined {
   const stamp = new Date(createdTime).getTime();

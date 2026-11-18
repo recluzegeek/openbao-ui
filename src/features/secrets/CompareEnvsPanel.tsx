@@ -7,12 +7,14 @@ import { formatWhen, mask } from '@/lib/format';
 import { EnvBadge } from '@/components/common/Extras';
 import { Button } from '@/components/common/Button';
 
+type DifferenceReason = 'missing' | 'value';
+
 function EnvColumn({ env, query, keys, revealed, different }: {
   env: string;
   query: UseQueryResult<KVResponse>;
   keys: string[];
   revealed: boolean;
-  different: Set<string>;
+  different: Map<string, DifferenceReason>;
 }) {
   const data = (query.data?.data.data ?? {}) as Record<string, unknown>;
   const meta = query.data?.data.metadata;
@@ -28,11 +30,15 @@ function EnvColumn({ env, query, keys, revealed, different }: {
       {keys.map((key) => {
         const present = Object.prototype.hasOwnProperty.call(data, key);
         const value = data[key];
+        const reason = different.get(key);
+        const badge = !present ? 'missing here'
+          : reason === 'value' ? 'value differs'
+            : reason === 'missing' ? 'set elsewhere' : undefined;
         return (
-          <div className={`compare-field ${present ? '' : 'compare-field--missing'} ${different.has(key) ? 'compare-field--different' : ''}`} key={key} data-testid={`compare-${env}-${key}`}>
+          <div className={`compare-field ${present ? '' : 'compare-field--missing'} ${reason ? 'compare-field--different' : ''}`} key={key} data-testid={`compare-${env}-${key}`}>
             <span className="compare-field__key mono" title={key}>
               {key}
-              {different.has(key) && <span className="compare-field__badge">differs</span>}
+              {badge && <span className="compare-field__badge" data-testid={`compare-badge-${env}-${key}`}>{badge}</span>}
             </span>
             <span className={`compare-field__value mono ${revealed ? '' : 'masked'}`} title={revealed && present ? String(value ?? '') : undefined}>
               {!present ? '—' : revealed ? String(value ?? '') : mask(value)}
@@ -56,11 +62,12 @@ export function CompareEnvsPanel({ project, path, envs }: { project: string; pat
   });
   const payloads = results.map((result) => (result.data?.data.data ?? {}) as Record<string, unknown>);
   const keys = [...new Set(payloads.flatMap((payload) => Object.keys(payload)))].sort();
-  const different = new Set(keys.filter((key) => {
+  const different = new Map<string, DifferenceReason>();
+  for (const key of keys) {
     const present = payloads.map((payload) => Object.prototype.hasOwnProperty.call(payload, key));
-    if (present.some((value) => !value)) return true;
-    return new Set(payloads.map((payload) => String(payload[key] ?? ''))).size > 1;
-  }));
+    if (present.some((value) => !value)) different.set(key, 'missing');
+    else if (new Set(payloads.map((payload) => String(payload[key] ?? ''))).size > 1) different.set(key, 'value');
+  }
   const shownKeys = onlyDiff ? keys.filter((key) => different.has(key)) : keys;
 
   return (
@@ -84,8 +91,10 @@ export function CompareEnvsPanel({ project, path, envs }: { project: string; pat
           ))}
         </div>
         <p className="small muted" style={{ marginTop: '0.8rem' }}>
-          <GitCompareArrows size={12} /> {different.size} of {keys.length} fields differ. Values stay masked until you reveal
-          them deliberately. A dash means the field is absent in that environment.
+          <GitCompareArrows size={12} /> {different.size} of {keys.length} fields differ —{' '}
+          {[...different.values()].filter((reason) => reason === 'value').length} by value and{' '}
+          {[...different.values()].filter((reason) => reason === 'missing').length} because a field is absent in an environment.
+          Badges explain why. Values stay masked until you reveal them deliberately.
         </p>
       </div>
     </div>

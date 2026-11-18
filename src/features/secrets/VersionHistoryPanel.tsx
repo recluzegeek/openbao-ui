@@ -7,7 +7,7 @@ import { secretApiPath } from '@/lib/baoPaths';
 import { canAny } from '@/lib/capabilities';
 import { formatWhen, mask } from '@/lib/format';
 import { lifecycleCapabilityPaths, useAuditTrail, useSecretMetadata } from '@/lib/queries';
-import { actorForVersion, diffData, type FieldDiff } from '@/lib/secretDiff';
+import { actorForVersion, diffData, otherVersion, type FieldDiff } from '@/lib/secretDiff';
 import { versionState } from '@/lib/secretLifecycle';
 import { useToast } from '@/lib/toast';
 import { Badge } from '@/components/common/Badge';
@@ -31,8 +31,8 @@ type PendingAction = {
 };
 
 const STATUS_LABELS: Record<FieldDiff['status'], string> = {
-  added: 'added',
-  removed: 'removed',
+  added: 'only in B',
+  removed: 'only in A',
   changed: 'changed',
   same: 'same',
 };
@@ -78,6 +78,30 @@ export function VersionHistoryPanel({
     setLeft(current);
     setRight(versions.find((version) => version < current) ?? current);
   }, [current, versionKey, left, right, versions]);
+
+  function pickA(version: number) {
+    const nextRight = version === right ? otherVersion(versions, version) : right;
+    setLeft(version);
+    if (nextRight !== undefined) setRight(nextRight);
+  }
+
+  function pickB(version: number) {
+    if (version === left) {
+      const nextLeft = otherVersion(versions, version);
+      if (nextLeft !== undefined) setLeft(nextLeft);
+      setRight(version);
+      return;
+    }
+    setRight(version);
+  }
+
+  // Revealed diff values re-mask on their own and whenever the compared pair changes.
+  useEffect(() => {
+    if (!revealed) return;
+    const timer = window.setTimeout(() => setRevealed(false), 30_000);
+    return () => window.clearTimeout(timer);
+  }, [revealed]);
+  useEffect(() => { setRevealed(false); }, [left, right]);
 
   const versionQueries = useQueries({
     queries: [left, right].map((version) => ({
@@ -211,8 +235,20 @@ export function VersionHistoryPanel({
                 </span>
               </button>
               <span className="version-row__actions">
-                <button className={`mini-btn ${left === version ? 'active' : ''}`} onClick={() => setLeft(version)} title="Use as left side of diff">A</button>
-                <button className={`mini-btn ${right === version ? 'active' : ''}`} onClick={() => setRight(version)} title="Use as right side of diff">B</button>
+                <button
+                  className={`mini-btn ${left === version ? 'active' : ''}`}
+                  onClick={() => pickA(version)}
+                  title={`Compare from v${version} (side A)`}
+                  aria-label={`Use version ${version} as side A of the diff`}
+                  data-testid={`version-a-${version}`}
+                >A</button>
+                <button
+                  className={`mini-btn ${right === version ? 'active' : ''}`}
+                  onClick={() => pickB(version)}
+                  title={`Compare to v${version} (side B)`}
+                  aria-label={`Use version ${version} as side B of the diff`}
+                  data-testid={`version-b-${version}`}
+                >B</button>
                 {state === 'deleted' && canUndelete && (
                   <button className="mini-btn" onClick={() => setPending({ kind: 'undelete', version })} title={`Restore version ${version}`} aria-label={`Undelete version ${version}`} data-testid={`undelete-${version}`}>
                     <Undo2 size={13} />
@@ -242,7 +278,8 @@ export function VersionHistoryPanel({
         <div className="divider" />
         <div className="diff-head">
           <GitCompareArrows size={16} />
-          <h4>Diff v{left ?? '–'} → v{right ?? '–'}</h4>
+          <h4 data-testid="diff-title">Compare A v{left ?? '–'} → B v{right ?? '–'}</h4>
+          <span className="small muted">Use A / B on a version row to pick the two sides</span>
           <label className="check-row">
             <input type="checkbox" checked={onlyChanges} onChange={(event) => setOnlyChanges(event.target.checked)} />
             Only changes
@@ -251,13 +288,26 @@ export function VersionHistoryPanel({
             {revealed ? 'Mask values' : 'Reveal values'}
           </Button>
         </div>
-        {versionQueries.some((query) => query.isLoading) && <div className="state"><div className="spinner" /></div>}
-        {diff.length === 0 && !versionQueries.some((query) => query.isLoading) && (
+        {left === right && (
+          <div className="notice small" data-testid="diff-same-version">
+            A and B both point to v{left ?? '–'}. Pick a different version for one side to see a comparison.
+          </div>
+        )}
+        {left !== right && versionQueries.some((query) => query.isLoading) && <div className="state"><div className="spinner" /></div>}
+        {left !== right && diff.length === 0 && !versionQueries.some((query) => query.isLoading) && (
           <p className="small muted">Choose two readable versions to see what changed.</p>
         )}
-        {shown.length > 0 && (
+        {left !== right && diff.length > 0 && (
+          <p className="small muted" data-testid="diff-summary">
+            {diff.filter((item) => item.status === 'changed').length} changed ·{' '}
+            {diff.filter((item) => item.status === 'added').length} only in B ·{' '}
+            {diff.filter((item) => item.status === 'removed').length} only in A ·{' '}
+            {diff.filter((item) => item.status === 'same').length} unchanged
+          </p>
+        )}
+        {left !== right && shown.length > 0 && (
           <div className="diff-table" data-testid="version-diff">
-            <div className="diff-table__head"><span>Field</span><span>v{left}</span><span>v{right}</span></div>
+            <div className="diff-table__head"><span>Field</span><span>A · v{left}</span><span>B · v{right}</span></div>
             {shown.map((item) => (
               <div className={`diff-table__row diff-table__row--${item.status}`} key={item.key} data-testid={`diff-${item.key}`}>
                 <span className="mono">{item.key} <Badge size="small" variant={item.status === 'same' ? 'outline' : 'info'}>{STATUS_LABELS[item.status]}</Badge></span>

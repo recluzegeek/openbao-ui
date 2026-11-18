@@ -21,6 +21,14 @@ export function dataFromRows(rows: FieldRow[]): Record<string, string> {
   return data;
 }
 
+/** Count value-level field differences, including adds and removals. */
+export function countFieldChanges(before: Record<string, string>, after: Record<string, string>): number {
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  let count = 0;
+  for (const key of keys) if (before[key] !== after[key]) count++;
+  return count;
+}
+
 /** Field names become KV data keys, so reject characters that break tooling and snippets. */
 export function fieldNameError(key: string): string | null {
   const name = key.trim();

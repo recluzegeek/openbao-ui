@@ -30,8 +30,9 @@ import { can, deniedReason } from '@/lib/capabilities';
 import { envMetadataPath, envRank, secretApiPath, secretPath } from '@/lib/baoPaths';
 import { envFile, formatWhen, mask } from '@/lib/format';
 import { pushRecent } from '@/lib/navigationMemory';
-import { dataFromRows, rowsFromData, validateRows, type FieldRow } from '@/lib/secretForm';
+import { countFieldChanges, dataFromRows, rowsFromData, validateRows, type FieldRow } from '@/lib/secretForm';
 import { buildReferenceLookup, findReferences, resolveReferences, parseKeyValueText, serializeKeyValue, type ImportFormat } from '@/lib/secretFormats';
+import { promotionPreview, promotionSummary, type PromotionPreview } from '@/lib/promotion';
 import {
   effectiveValue,
   mergeAnnotations,
@@ -132,28 +133,48 @@ function SecretField({ name, value, comment, override, resolved, resetKey }: {
   );
 }
 
-function TargetPreview({ project, env, service }: { project: string; env: string; service: string }) {
-  const query = useQuery({
-    queryKey: ['secret', project, env, service, 'latest'],
-    queryFn: () => bao.readSecret(secretApiPath(project, env, service)),
-    retry: false,
-  });
-  if (query.isLoading) return <div className="state"><div className="spinner" /></div>;
-  if (query.isError) {
-    return <div className="notice">No readable value at the target. Promotion will create or overwrite it.</div>;
+function TargetPreview({ preview, loading, missing, sourceCount }: {
+  preview: PromotionPreview;
+  loading: boolean;
+  missing: boolean;
+  sourceCount: number;
+}) {
+  if (loading) return <div className="state"><div className="spinner" /></div>;
+  if (missing) {
+    return (
+      <div className="notice" data-testid="promote-preview">
+        No readable value at the destination. Promotion will create it with {sourceCount} field{sourceCount === 1 ? '' : 's'}.
+      </div>
+    );
   }
-  const data = query.data?.data.data ?? {};
-  if (Object.keys(data).length === 0) return <div className="notice">Target is empty.</div>;
+  const groups: Array<{ id: string; label: string; hint: string; variant: 'warning' | 'success' | 'outline' | 'danger'; fields: string[] }> = [
+    { id: 'overwritten', label: 'Overwritten', hint: 'Destination value will change', variant: 'warning', fields: preview.overwritten },
+    { id: 'added', label: 'Added', hint: 'New field at the destination', variant: 'success', fields: preview.added },
+    { id: 'unchanged', label: 'Unchanged', hint: 'Already matches the source', variant: 'outline', fields: preview.unchanged },
+    { id: 'removed', label: 'Removed by this write', hint: 'Destination-only fields will be deleted', variant: 'danger', fields: preview.removed },
+  ];
   return (
-    <div className="grid">
-      {Object.entries(data).map(([key, value]) => (
-        <div key={key} className="secret-field">
-          <span className="secret-field__key">{key}</span>
-          <span className="secret-field__value masked">{mask(value)}</span>
-          <span />
+    <div className="grid" data-testid="promote-preview">
+      {groups.map((group) => (
+        <div key={group.id} data-testid={`promote-group-${group.id}`}>
+          <div className="section-title">
+            {group.label} <Badge size="small" variant={group.variant}>{group.fields.length}</Badge>
+          </div>
+          <p className="small muted">{group.hint}</p>
+          {group.fields.length === 0 ? (
+            <p className="small muted">None</p>
+          ) : (
+            <div className="method-chips">
+              {group.fields.map((name) => (
+                <span className="method-chip" key={name} data-testid={`promote-${group.id}-${name}`}>
+                  <code>{name}</code>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       ))}
-      <p className="small muted">Values stay masked here. The destination is overwritten with the selected version.</p>
+      <p className="small muted">Field names only — values stay masked. Promotion writes the complete source field set, so destination-only fields cannot survive it.</p>
     </div>
   );
 }
@@ -246,6 +267,7 @@ export function SecretsPage() {
   const [tab, setTab] = useState<'env' | 'creds'>('env');
   const [version, setVersion] = useState<number | undefined>(undefined);
   const [promoteTo, setPromoteTo] = useState<string | null>(null);
+  const [promoteAck, setPromoteAck] = useState(false);
   const [confirmCopyEnv, setConfirmCopyEnv] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
   const [editor, setEditor] = useState<EditorState | null>(null);
@@ -261,6 +283,9 @@ export function SecretsPage() {
   const [importText, setImportText] = useState('');
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
   const [importError, setImportError] = useState<string | null>(null);
+  // Standalone import is independent of the edit dialog — it stages a NEW secret.
+  const [importStandalone, setImportStandalone] = useState(false);
+  const [importTarget, setImportTarget] = useState('');
   const [exportFormat, setExportFormat] = useState<ImportFormat>('env');
   const [sourceEnv, setSourceEnv] = useState<string | null>(null);
 
@@ -351,6 +376,17 @@ export function SecretsPage() {
     [secretQ.data],
   );
   const resetKey = `${project ?? ''}/${env ?? ''}/${service ?? ''}/${version ?? 'latest'}`;
+  const editorChanges = useMemo(() => {
+    if (!editor || !editorBaseline) return 0;
+    try {
+      const base = JSON.parse(editorBaseline) as EditorState;
+      return countFieldChanges(dataFromRows(base.rows), dataFromRows(editor.rows))
+        + (base.name === editor.name ? 0 : 1)
+        + (JSON.stringify(base.annotations) === JSON.stringify(editor.annotations) ? 0 : 1);
+    } catch {
+      return 0;
+    }
+  }, [editor, editorBaseline]);
 
   function updateRow(id: string, patch: Partial<FieldRow>) {
     setEditor((current) => {
@@ -438,10 +474,52 @@ export function SecretsPage() {
     addToast('success', `${Object.keys(result.data).length} fields staged`, 'Save the secret to write them.');
   }
 
+  /** Page-level import never opens the current secret's edit dialog. */
+  function openStandaloneImport() {
+    setImportStandalone(true);
+    setImportTarget(folder ? `${folder}/` : '');
+    setImportFormat('env');
+    setImportText('');
+    setImportError(null);
+    setDialog('import');
+  }
+
+  function openDraftImport() {
+    setImportStandalone(false);
+    setImportFormat('env');
+    setImportText('');
+    setImportError(null);
+    setDialog('import');
+  }
+
   function applyImport() {
     const result = parseKeyValueText(importText, importFormat);
     if (result.error) {
       setImportError(result.error);
+      return;
+    }
+    if (importStandalone) {
+      const name = importTarget.trim();
+      if (!validSecretPath(name)) {
+        setImportError('Give the new secret a path relative to this environment, for example database/postgres.');
+        return;
+      }
+      // Stage a fresh create draft. No read of the current secret and no write
+      // happens until the user reviews the table and saves (CAS 0).
+      const next: EditorState = {
+        mode: 'create',
+        name,
+        rows: rowsFromData(result.data),
+        annotations: { tags: [], note: '', comments: {}, overrides: {} },
+        baseMetadata: {},
+      };
+      setEditor(next);
+      setEditorBaseline(editorSnapshot(next));
+      setImportStandalone(false);
+      setImportText('');
+      setImportError(null);
+      setDialog(null);
+      addToast('success', `Staged ${Object.keys(result.data).length} fields from ${importFormat.toUpperCase()}`, 'Review the new secret, then save it to create it.');
       return;
     }
     applyImported(result.data, importMode);
@@ -575,6 +653,22 @@ export function SecretsPage() {
     retry: false,
   });
 
+  // Read the promote destination only while its dialog is open. The preview is
+  // computed from field names and value comparisons; no value is ever rendered.
+  const promoteTargetQ = useQuery({
+    queryKey: ['secret', project, promoteTo, service, 'promote-preview'],
+    queryFn: () => bao.readSecret(secretApiPath(project!, promoteTo!, service!)),
+    enabled: Boolean(project && promoteTo && service),
+    retry: false,
+  });
+  const promoteSource = useMemo(() => secretQ.data?.data.data ?? {}, [secretQ.data]);
+  const promoteTarget = useMemo(
+    () => promoteTargetQ.isSuccess ? (promoteTargetQ.data.data.data ?? {}) : {},
+    [promoteTargetQ.isSuccess, promoteTargetQ.data],
+  );
+  const promotePreview = useMemo(() => promotionPreview(promoteSource, promoteTarget), [promoteSource, promoteTarget]);
+  const promotionNeedsAck = promoteTargetQ.isSuccess && promotePreview.removed.length > 0;
+
   function applySourceValues() {
     if (!sourceQuery.data) return;
     applyImported(
@@ -586,15 +680,26 @@ export function SecretsPage() {
     setSourceEnv(null);
   }
 
+  function openPromote(target: string) {
+    setPromoteAck(false);
+    setPromoteTo(target);
+  }
+
+  function closePromote() {
+    setPromoteTo(null);
+    setPromoteAck(false);
+  }
+
   async function promote() {
     if (!project || !env || !service || !promoteTo || !secretQ.data) return;
+    if (promotionNeedsAck && !promoteAck) return;
     const target = secretApiPath(project, promoteTo, service);
     const data = secretQ.data.data.data;
     try {
       await bao.writeSecret(target, data);
       await queryClient.invalidateQueries();
-      addToast('success', `Promoted to ${promoteTo}`, `${project}/${service} now matches ${env}.`);
-      setPromoteTo(null);
+      addToast('success', `Promoted to ${promoteTo}`, `${project}/${service} now matches ${env} · ${promotionSummary(promotePreview)}.`);
+      closePromote();
     } catch (error) {
       addToast('error', 'Promotion failed', error instanceof Error ? error.message : undefined);
     }
@@ -755,13 +860,21 @@ export function SecretsPage() {
                     <button onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); setConfirmCopyEnv(true); }} disabled={!secretQ.data}>
                       <FileJson size={14} /> Copy .env
                     </button>
-                    <button onClick={() => void (async () => { await openEdit(); setDialog('import'); })} disabled={!writable || !service}>
-                      <Upload size={14} /> Import values…
+                    <button
+                      data-testid="open-import"
+                      onClick={(event) => {
+                        event.currentTarget.closest('details')?.removeAttribute('open');
+                        openStandaloneImport();
+                      }}
+                      disabled={!canCreate}
+                      title={canCreate ? 'Create a new secret from pasted or imported fields' : 'Your token cannot create secrets here'}
+                    >
+                      <Upload size={14} /> Import new secret…
                     </button>
                     <button onClick={() => void (async () => { await openEdit(); setDialog('export'); })} disabled={!service}>
                       <Download size={14} /> Export values…
                     </button>
-                    <button onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); setPromoteTo(envs.find((name) => name !== env) ?? null); }} disabled={!writable || envs.length < 2}>
+                    <button onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); openPromote(envs.find((name) => name !== env) ?? ''); }} disabled={!writable || !service || envs.length < 2}>
                       <ArrowRightLeft size={14} /> Promote to…
                     </button>
                   </div>
@@ -888,19 +1001,56 @@ export function SecretsPage() {
       {promoteTo && project && env && service && secretQ.data && (
         <Dialog
           title={`Promote ${service} to ${promoteTo}`}
-          onClose={() => setPromoteTo(null)}
+          testId="promote-dialog"
+          onClose={closePromote}
           footer={
             <>
-              <Button variant="outlined" onClick={() => setPromoteTo(null)}>Cancel</Button>
-              <Button icon={<ArrowRightLeft size={15} />} onClick={() => void promote()}>Promote values</Button>
+              <Button variant="outlined" onClick={closePromote}>Cancel</Button>
+              <Button
+                icon={<ArrowRightLeft size={15} />}
+                data-testid="promote-confirm"
+                onClick={() => void promote()}
+                disabled={promotionNeedsAck && !promoteAck}
+                title={promotionNeedsAck && !promoteAck ? 'Confirm the fields that will be removed first' : 'Write the source field set to the destination'}
+              >
+                Promote values
+              </Button>
             </>
           }
         >
           <p className="small muted">
-            This copies the {env} version into <span className="mono">{secretPath(project, promoteTo, service)}</span>.
-            Review the destination first — existing values will be replaced.
+            This copies the {version !== undefined ? `v${version} ` : 'current '}field set from {env} into{' '}
+            <span className="mono">{secretPath(project, promoteTo, service)}</span>. Field names are listed below; values stay masked.
           </p>
-          <TargetPreview project={project} env={promoteTo} service={service} />
+          <div className="field">
+            <label htmlFor="promote-target">Destination environment</label>
+            <select
+              id="promote-target"
+              data-testid="promote-target"
+              value={promoteTo}
+              onChange={(event) => openPromote(event.target.value)}
+            >
+              {envs.filter((name) => name !== env).map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+          </div>
+          <TargetPreview
+            preview={promotePreview}
+            loading={promoteTargetQ.isLoading}
+            missing={promoteTargetQ.isError}
+            sourceCount={Object.keys(promoteSource).length}
+          />
+          {promotionNeedsAck && (
+            <div className="notice error small" data-testid="promote-removal-warning">
+              <strong>{promotePreview.removed.length} field{promotePreview.removed.length === 1 ? '' : 's'} will be deleted at the destination.</strong>{' '}
+              Promotion writes the whole source field set, so destination-only fields cannot be kept.
+            </div>
+          )}
+          {promotionNeedsAck && (
+            <label className="check-row" data-testid="promote-ack">
+              <input type="checkbox" checked={promoteAck} onChange={(event) => setPromoteAck(event.target.checked)} />
+              I understand these fields will be removed
+            </label>
+          )}
           <div className="notice warning small">
             The destination is written with your current token. Your audit log records the write.
           </div>
@@ -937,10 +1087,13 @@ export function SecretsPage() {
           }}
           footer={
             <>
+              <span className="small muted" style={{ marginRight: 'auto' }} data-testid="editor-change-count">
+                {editorChanges === 0 ? 'No changes' : `${editorChanges} change${editorChanges === 1 ? '' : 's'}`}
+              </span>
               <Button variant="outlined" onClick={() => {
                 if (editorBaseline && editorSnapshot(editor) !== editorBaseline) setConfirmDiscard(true);
                 else setEditor(null);
-              }} disabled={saving}>Cancel</Button>
+              }} disabled={saving}>Discard</Button>
               <Button
                 icon={<Lock size={15} />}
                 onClick={() => void saveEditor()}
@@ -1004,7 +1157,7 @@ export function SecretsPage() {
                 </label>
                 <Button size="small" variant="ghost" icon={<Plus size={14} />} onClick={addRow}>Add field</Button>
                 <Button size="small" variant="ghost" icon={<ClipboardPaste size={14} />} onClick={() => { setBulkError(null); setDialog('bulk'); }}>Bulk paste</Button>
-                <Button size="small" variant="ghost" icon={<Upload size={14} />} onClick={() => { setImportError(null); setDialog('import'); }}>Import</Button>
+                <Button size="small" variant="ghost" icon={<Upload size={14} />} onClick={openDraftImport}>Import into draft</Button>
                 <Button size="small" variant="ghost" icon={<Download size={14} />} onClick={() => setDialog('export')}>Export</Button>
                 {editor.mode === 'edit' && envs.length > 1 && (
                   <Button size="small" variant="ghost" icon={<ArrowRightLeft size={14} />} onClick={() => { setSourceEnv(null); setDialog('source'); }}>From env…</Button>
@@ -1069,21 +1222,46 @@ export function SecretsPage() {
         </Dialog>
       )}
 
-      {dialog === 'import' && editor && (
+      {dialog === 'import' && (editor || importStandalone) && (
         <Dialog
-          title="Import fields"
-          onClose={() => setDialog(null)}
+          title={importStandalone ? 'Import a new secret' : 'Import into this draft'}
+          testId="import-dialog"
+          onClose={() => { setDialog(null); setImportStandalone(false); }}
           footer={
             <>
-              <Button variant="outlined" onClick={() => setDialog(null)}>Cancel</Button>
-              <Button icon={<Upload size={15} />} onClick={applyImport}>Import</Button>
+              <Button variant="outlined" onClick={() => { setDialog(null); setImportStandalone(false); }}>Cancel</Button>
+              <Button icon={<Upload size={15} />} data-testid="import-apply" onClick={applyImport}>
+                {importStandalone ? 'Review fields' : 'Import'}
+              </Button>
             </>
           }
         >
+          {importStandalone && (
+            <>
+              <p className="small muted">
+                Create a new secret from pasted or uploaded fields. Nothing is written yet — you review and save the draft.
+              </p>
+              <div className="field">
+                <label htmlFor="import-target">New secret path (relative to this environment)</label>
+                <input
+                  id="import-target"
+                  className="mono"
+                  data-testid="import-target"
+                  autoFocus
+                  placeholder="e.g. database/postgres"
+                  value={importTarget}
+                  onChange={(event) => { setImportTarget(event.target.value); setImportError(null); }}
+                />
+                <p className="small muted">
+                  Stored at <span className="mono">kv/data/{project && env ? secretApiPath(project, env, importTarget || '<path>') : '<path>'}</span>
+                </p>
+              </div>
+            </>
+          )}
           <div className="field-grid">
             <div className="field">
               <label htmlFor="import-format">Format</label>
-              <select id="import-format" value={importFormat} onChange={(event) => setImportFormat(event.target.value as ImportFormat)}>
+              <select id="import-format" data-testid="import-format" value={importFormat} onChange={(event) => setImportFormat(event.target.value as ImportFormat)}>
                 <option value="env">.env</option>
                 <option value="json">JSON</option>
                 <option value="yaml">YAML</option>
@@ -1106,25 +1284,36 @@ export function SecretsPage() {
               />
             </div>
           </div>
-          <div className="check-row">
-            <input type="checkbox" checked={importMode === 'replace'} onChange={(event) => setImportMode(event.target.checked ? 'replace' : 'merge')} />
-            Replace all staged fields (otherwise imported names merge into the table)
-          </div>
+          {!importStandalone && (
+            <div className="check-row">
+              <input type="checkbox" checked={importMode === 'replace'} onChange={(event) => setImportMode(event.target.checked ? 'replace' : 'merge')} />
+              Replace all staged fields (otherwise imported names merge into the table)
+            </div>
+          )}
           <div className="field">
             <label htmlFor="import-text">Paste content</label>
             <textarea
               id="import-text"
               className="mono"
+              data-testid="import-text"
               rows={9}
               value={importText}
               placeholder={importFormat === 'json' ? '{"KEY": "value"}' : 'KEY=value'}
               onChange={(event) => { setImportText(event.target.value); setImportError(null); }}
             />
           </div>
-          {importError && <div className="notice error small" role="alert">{importError}</div>}
-          {!importError && importText.trim() && (
-            <p className="small muted">{Object.keys(parseKeyValueText(importText, importFormat).data).length} fields detected.</p>
-          )}
+          {importError && <div className="notice error small" role="alert" data-testid="import-error">{importError}</div>}
+          {!importError && importText.trim() && (() => {
+            const parsed = parseKeyValueText(importText, importFormat);
+            return (
+              <div data-testid="import-detected">
+                <p className="small muted">{Object.keys(parsed.data).length} fields detected.</p>
+                <div className="method-chips">
+                  {Object.keys(parsed.data).map((name) => <span className="method-chip" key={name}><code>{name}</code></span>)}
+                </div>
+              </div>
+            );
+          })()}
         </Dialog>
       )}
 
