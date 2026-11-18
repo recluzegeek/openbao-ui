@@ -1,9 +1,38 @@
 import { useMemo, useState } from 'react';
-import { Bot, Info } from 'lucide-react';
-import type { AuthMethodSummary } from '@/lib/api';
-import { identitySnippets, type CloudProvider, type IdentityKind, type IdentityOptions } from '@/lib/machineIdentity';
+import { useQueryClient } from '@tanstack/react-query';
+import { Bot, Info, KeyRound, ShieldCheck } from 'lucide-react';
+import { bao, type AuthMethodSummary } from '@/lib/api';
+import { can } from '@/lib/capabilities';
+import { mask } from '@/lib/format';
+import { identitySnippets, validAppRoleName, type CloudProvider, type IdentityKind, type IdentityOptions } from '@/lib/machineIdentity';
+import { appRoleCapabilityPaths, useCapabilities } from '@/lib/queries';
+import { useToast } from '@/lib/toast';
 import { Badge } from '@/components/common/Badge';
-import { CodeSnippet } from '@/components/common/Extras';
+import { Button } from '@/components/common/Button';
+import { CodeSnippet, CopyButton, Dialog } from '@/components/common/Extras';
+
+/** The secret ID is shown at most once. It is never written to state beyond this dialog or to storage. */
+function ShowOnceField({ label, value, testId }: { label: string; value: string; testId: string }) {
+  const [revealed, setRevealed] = useState(false);
+  return (
+    <div className="field" data-testid={testId}>
+      <label>{label}</label>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+        <code className="mono" style={{ flex: 1, overflowWrap: 'anywhere', padding: '0.5rem', background: 'var(--color-background)', borderRadius: 'var(--radius-md)' }}>
+          {revealed ? value : mask(value)}
+        </code>
+        <button
+          type="button" className="icon-btn" aria-label={revealed ? `Hide ${label}` : `Reveal ${label}`}
+          onClick={() => setRevealed((open) => !open)}
+          title={revealed ? 'Hide' : 'Reveal'}
+        >
+          {revealed ? <ShieldCheck size={16} /> : <KeyRound size={16} />}
+        </button>
+        <CopyButton value={value} label={`Copy ${label}`} />
+      </div>
+    </div>
+  );
+}
 
 interface MachineIdentitiesProps {
   project: string;
@@ -19,6 +48,20 @@ const KINDS: { id: IdentityKind; label: string; blurb: string }[] = [
 ];
 
 export function MachineIdentities({ project, policies, authMethods }: MachineIdentitiesProps) {
+  const queryClient = useQueryClient();
+  const { addToast } = useToast();
+  const caps = useCapabilities(appRoleCapabilityPaths()).data;
+  const approleEnabled = authMethods.some((method) => method.type === 'approle');
+  const canEnableAppRole = can(caps, 'sys/auth/approle', 'create');
+  const canCreateRole = can(caps, 'auth/approle/role/__new__', 'create');
+  const canCreateAppRole = canCreateRole && (approleEnabled || canEnableAppRole);
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  // Holds the show-once secret ID only until the result dialog is dismissed.
+  const [created, setCreated] = useState<{ name: string; roleId: string; secretId: string; accessor?: string } | null>(null);
+
   const [kind, setKind] = useState<IdentityKind>('approle');
   const [options, setOptions] = useState<Omit<IdentityOptions, 'policies'>>({
     name: `${project}-ci`,
@@ -41,6 +84,36 @@ export function MachineIdentities({ project, policies, authMethods }: MachineIde
 
   function togglePolicy(name: string) {
     setChosenPolicies((current) => current.includes(name) ? current.filter((item) => item !== name) : [...current, name]);
+  }
+
+  async function createAppRole() {
+    const name = options.name.trim();
+    if (!validAppRoleName(name)) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      if (!approleEnabled) {
+        await bao.enableAppRole();
+        await queryClient.invalidateQueries({ queryKey: ['auth-methods'] });
+      }
+      await bao.createAppRole(name, chosenPolicies, options.tokenTtl.trim() || '1h');
+      const role = await bao.readAppRoleId(name);
+      const secret = await bao.generateAppRoleSecretId(name);
+      // The secret ID exists only here until this dialog is closed; it is never
+      // logged, put in a URL, or written to storage.
+      setCreated({
+        name,
+        roleId: role.data.role_id,
+        secretId: secret.data.secret_id,
+        accessor: secret.data.secret_id_accessor,
+      });
+      setConfirmOpen(false);
+      addToast('success', 'AppRole created', `${name} is ready — copy the secret ID now.`);
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : 'Could not create the AppRole.');
+    } finally {
+      setCreating(false);
+    }
   }
 
   const snippets = useMemo(
@@ -148,6 +221,32 @@ export function MachineIdentities({ project, policies, authMethods }: MachineIde
             </div>
           </div>
 
+          {kind === 'approle' && (
+            <div className="approle-create">
+              <div className="section-title">Create this role on the server</div>
+              <p className="small muted">
+                Create an AppRole with the policies above. The secret ID is generated once and shown only
+                after creation — OpenBao cannot show it again.
+              </p>
+              <Button
+                variant="primary" size="small" data-testid="approle-create"
+                disabled={!canCreateAppRole || !validAppRoleName(options.name)}
+                onClick={() => { setCreateError(null); setConfirmOpen(true); }}
+              >
+                {approleEnabled ? 'Create AppRole' : 'Enable AppRole & create'}
+              </Button>
+              {!validAppRoleName(options.name) && (
+                <span className="field-error">Role name: letters, digits, dot, dash or underscore, starting with a letter or digit.</span>
+              )}
+              {!canCreateAppRole && (
+                <p className="small muted">
+                  Requires create on <span className="mono">auth/approle/role/</span>
+                  {!approleEnabled && <> and on <span className="mono">sys/auth/approle</span> to enable the method</>}.
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="grid grid--split" style={{ gap: '1rem' }}>
             <div>
               <div className="section-title">CLI commands</div>
@@ -184,6 +283,69 @@ export function MachineIdentities({ project, policies, authMethods }: MachineIde
           )}
         </div>
       </div>
+
+      {confirmOpen && (
+        <Dialog
+          title="Create AppRole"
+          testId="approle-confirm"
+          guardClose={() => !creating}
+          onClose={() => setConfirmOpen(false)}
+          footer={
+            <>
+              <Button variant="outlined" disabled={creating} onClick={() => setConfirmOpen(false)}>Cancel</Button>
+              <Button
+                variant="primary" loading={creating} data-testid="approle-confirm-create"
+                onClick={() => void createAppRole()}
+              >
+                {approleEnabled ? 'Create AppRole' : 'Enable AppRole & create'}
+              </Button>
+            </>
+          }
+        >
+          <div className="grid" style={{ gap: '0.7rem' }}>
+            <div className="notice warning small">
+              This writes to the live server. A new secret ID will be generated once and shown only in
+              the next dialog — it cannot be recovered afterward.
+            </div>
+            <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.4rem 0.8rem', fontSize: '0.82rem' }}>
+              <dt className="muted">Role name</dt><dd className="mono" style={{ margin: 0 }} data-testid="approle-confirm-name">{options.name.trim()}</dd>
+              <dt className="muted">Policies</dt><dd style={{ margin: 0 }}>{chosenPolicies.length ? chosenPolicies.join(', ') : 'none'}</dd>
+              <dt className="muted">Token TTL</dt><dd className="mono" style={{ margin: 0 }}>{options.tokenTtl.trim() || '1h'}</dd>
+              <dt className="muted">Auth method</dt><dd style={{ margin: 0 }}>{approleEnabled ? 'already enabled' : 'will be enabled at approle/'}</dd>
+            </dl>
+            {createError && <div className="notice error small" data-testid="approle-create-error">{createError}</div>}
+          </div>
+        </Dialog>
+      )}
+
+      {created && (
+        <Dialog
+          title="AppRole created — save the secret ID now"
+          testId="approle-result"
+          onClose={() => setCreated(null)}
+          footer={<Button variant="primary" data-testid="approle-result-done" onClick={() => setCreated(null)}>Done</Button>}
+        >
+          <div className="grid" style={{ gap: '0.8rem' }}>
+            <div className="notice warning small">
+              This is the only time OpenBao will show this secret ID. Copy it into your secrets manager
+              now — closing this dialog clears it from the screen and it is never stored by the console.
+            </div>
+            <div className="field" data-testid="approle-result-name">
+              <label>Role</label>
+              <code className="mono">{created.name}</code>
+            </div>
+            <div className="field">
+              <label>Role ID (re-readable, not a credential)</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <code className="mono" data-testid="approle-result-role-id" style={{ flex: 1, overflowWrap: 'anywhere', padding: '0.5rem', background: 'var(--color-background)', borderRadius: 'var(--radius-md)' }}>{created.roleId}</code>
+                <CopyButton value={created.roleId} label="Copy role ID" />
+              </div>
+            </div>
+            <ShowOnceField label="Secret ID" value={created.secretId} testId="approle-result-secret" />
+            {created.accessor && <p className="small muted">Secret ID accessor: <span className="mono">{created.accessor}</span></p>}
+          </div>
+        </Dialog>
+      )}
     </div>
   );
 }

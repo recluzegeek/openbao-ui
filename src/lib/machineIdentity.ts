@@ -4,6 +4,11 @@ import { shellQuote } from './format';
 export type IdentityKind = 'approle' | 'kubernetes' | 'jwt-oidc' | 'cloud';
 export type CloudProvider = 'aws' | 'gcp' | 'azure';
 
+/** Role names become a URL path segment, so keep them to a safe, portable set. */
+export function validAppRoleName(name: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name.trim());
+}
+
 export interface IdentityOptions {
   name: string;
   policies: string[];

@@ -95,6 +95,7 @@ and wired into `capabilityPathsForSecret()` / `capabilityPathsForFolder()`.
 - `policy-rules` / `policy-rule-<n>` / `save-policy` — visual policy builder
 - `simulator-run` / `simulator-result-<path>` — capability simulator and its result rows
 - `identity-kind-<kind>` / `identity-snippet-cli` / `identity-snippet-http` — machine-identity wizard
+- `approle-create` / `approle-confirm` / `approle-confirm-name` / `approle-confirm-create` / `approle-result` / `approle-result-name` / `approle-result-role-id` / `approle-result-secret` / `approle-result-done` — real AppRole creation and show-once secret ID
 - `share-link-panel` / `wrap-ttl` / `create-share-link` / `share-link-dialog` / `share-link-value` / `share-link-done` — one-time link creation (For agents page)
 - `unwrap-page` / `unwrap-reveal` / `unwrap-success` / `unwrap-source` / `unwrap-fields` / `unwrap-field-<key>` — one-time link recipient view
 - `audit-search` / `audit-actor` / `audit-operation` / `audit-range` — audit filters; `audit-table` / `audit-entry-<n>` — results
@@ -139,6 +140,13 @@ countdown (`sessionSecondsLeft()` / `useSessionCountdown()` in `src/lib/session.
 five minutes). For renewable, expiring tokens a renew button POSTs `auth/token/renew-self` with no
 secret in the body, merges the new `ttl`/`expire_time` into the identity and re-checks it without
 logging the token value. Non-expiring (root / periodic) tokens show no countdown.
+
+**AppRole creation:** the machine-identity wizard can write a real AppRole. It enables `sys/auth/approle`
+only when needed (gated by `appRoleCapabilityPaths()` in `src/lib/queries.ts`), posts the role to
+`auth/approle/role/<name>` with `token_policies`, reads the re-readable `role-id`, and generates a
+**new** `secret-id` with `POST auth/approle/role/<name>/secret-id`. OpenBao returns the secret ID only
+in that response; the console holds it in transient dialog state only — masked by default, cleared on
+dismiss, never logged, persisted or embedded in a snippet. Role names are URL-safe (`validAppRoleName()`).
 
 **Auth method detection:** before sign-in the login page calls `bao.detectAuthMethods()`, an
 unauthenticated read of `sys/internal/ui/mounts`, and shows only the methods the server actually

@@ -428,3 +428,11 @@ export function accessCapabilityPaths() {
     'sys/auth/',
   ];
 }
+
+/** Paths needed to enable AppRole and create a role with a show-once secret ID. */
+export function appRoleCapabilityPaths() {
+  return [
+    'sys/auth/approle',
+    'auth/approle/role/__new__',
+  ];
+}

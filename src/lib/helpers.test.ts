@@ -8,7 +8,7 @@ import { bao, normalizeNamespace, request, setBaoConfig } from './api';
 import { mergeEffectivePolicies } from './auth';
 import { sessionSecondsLeft } from './session';
 import { shareLinkFor, validWrapTtl, wrappingTokenFromHash } from './wrapping';
-import { capabilityPathsForFolder, capabilityPathsForSecret, environmentCreationTarget, runbookCapabilityPaths } from './queries';
+import { appRoleCapabilityPaths, capabilityPathsForFolder, capabilityPathsForSecret, environmentCreationTarget, runbookCapabilityPaths } from './queries';
 import { environmentMarkerPath, inferLayout, physicalPath, type ClassifiedSecret, type LayoutProfile } from './layout';
 import { clearProjectLayouts, registerProjectLayout, resolveApiPath, resolveEnvMetadataPath, toLogicalPath } from './layoutResolver';
 import { actorLabel, auditCsv, auditPathHref, filterAuditEntries, operationLabel, type AuditEntry, type AuditFilters } from './audit';
@@ -32,7 +32,7 @@ import {
   templateRules,
   templateRulesFromLayout,
 } from './policy';
-import { identitySnippets } from './machineIdentity';
+import { identitySnippets, validAppRoleName } from './machineIdentity';
 import { deriveSetupStage, setupSnippets, SHORTCUTS } from './setup';
 
 beforeEach(() => clearProjectLayouts());
@@ -741,6 +741,50 @@ describe('session hardening', () => {
       method: 'POST',
       body: { custom_metadata: { owner: 'team-a' }, max_versions: 0, cas_required: true, delete_version_after: '0s' },
     });
+  });
+});
+
+describe('AppRole creation with show-once secret ID', () => {
+  it('keeps role names to a safe path segment', () => {
+    expect(validAppRoleName('ux-approle-1')).toBe(true);
+    expect(validAppRoleName('ci.deploy_role')).toBe(true);
+    expect(validAppRoleName('bad name')).toBe(false);
+    expect(validAppRoleName('../root')).toBe(false);
+    expect(validAppRoleName('a/b')).toBe(false);
+    expect(validAppRoleName('')).toBe(false);
+  });
+
+  it('probes the enable and create capability paths', () => {
+    expect(appRoleCapabilityPaths()).toEqual(['sys/auth/approle', 'auth/approle/role/__new__']);
+  });
+
+  it('enables, creates, reads role-id and generates a fresh secret ID on the right paths', async () => {
+    setBaoConfig({ token: 'test-token' });
+    const fetchStub = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ data: {} }) } as unknown as Response);
+
+    await bao.enableAppRole();
+    await bao.createAppRole('ux-ci', ['default', 'ux-viewer'], '1h');
+    await bao.readAppRoleId('ux-ci');
+    await bao.generateAppRoleSecretId('ux-ci');
+
+    const calls = fetchStub.mock.calls.map(([url, init]) => ({
+      url: String(url),
+      method: (init as RequestInit).method ?? 'GET',
+      body: (init as RequestInit).body ? JSON.parse(String((init as RequestInit).body)) : undefined,
+    }));
+    expect(calls.map((call) => call.url)).toEqual(expect.arrayContaining([
+      expect.stringContaining('/v1/sys/auth/approle'),
+      expect.stringContaining('/v1/auth/approle/role/ux-ci'),
+      expect.stringContaining('/v1/auth/approle/role/ux-ci/role-id'),
+      expect.stringContaining('/v1/auth/approle/role/ux-ci/secret-id'),
+    ]));
+    expect(calls[0].method).toBe('POST');
+    expect(calls[0].body).toEqual({ type: 'approle' });
+    expect(calls[1].body).toEqual({ token_policies: ['default', 'ux-viewer'], token_type: 'service', token_ttl: '1h' });
+    expect(calls[2].method).toBe('GET');
+    expect(calls[3].method).toBe('POST');
+    expect(calls[3].body).toEqual({});
   });
 });
 

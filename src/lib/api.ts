@@ -597,6 +597,33 @@ export const bao = {
     }));
   },
 
+  /** Enable the AppRole auth method at its default mount (no-op if already on). */
+  enableAppRole: (mount = 'approle') =>
+    request<void>(`sys/auth/${encodeURIComponent(mount)}`, { method: 'POST', data: { type: 'approle' } }),
+
+  /** Create an AppRole with the given token policies and lease. */
+  createAppRole: (name: string, policies: string[], tokenTtl: string, mount = 'approle') =>
+    request<void>(`auth/${encodeURIComponent(mount)}/role/${encodeURIComponent(name)}`, {
+      method: 'POST',
+      data: { token_policies: policies, token_type: 'service', token_ttl: tokenTtl },
+    }),
+
+  /** The role ID is a public identifier (not a credential) and is re-readable. */
+  readAppRoleId: (name: string, mount = 'approle') =>
+    request<{ data: { role_id: string } }>(
+      `auth/${encodeURIComponent(mount)}/role/${encodeURIComponent(name)}/role-id`,
+    ),
+
+  /**
+   * Generate a NEW secret ID. OpenBao returns it only in this response; it cannot be read back.
+   * Callers must hold it only in transient state, never in storage or logs.
+   */
+  generateAppRoleSecretId: (name: string, mount = 'approle') =>
+    request<{ data: { secret_id: string; secret_id_accessor?: string } }>(
+      `auth/${encodeURIComponent(mount)}/role/${encodeURIComponent(name)}/secret-id`,
+      { method: 'POST', data: {} },
+    ),
+
   /**
    * Checks real capabilities for a set of policies. A short-lived token is minted and revoked in a
    * finally block; the token value never leaves this function or enters UI state/logs.
