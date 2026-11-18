@@ -744,6 +744,34 @@ describe('session hardening', () => {
   });
 });
 
+describe('pre-login auth method detection', () => {
+  it('reads auth mounts from sys/internal/ui/mounts without a token', async () => {
+    const fetchStub = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true, status: 200,
+      text: async () => JSON.stringify({
+        data: {
+          auth: { 'userpass/': { type: 'userpass', accessor: 'a' }, 'oidc/': { type: 'oidc' } },
+          secret: {},
+        },
+      }),
+    } as unknown as Response);
+
+    setBaoConfig({ token: '' });
+    try {
+      const methods = await bao.detectAuthMethods();
+      expect(methods).toEqual([
+        { path: 'userpass', type: 'userpass', accessor: 'a' },
+        { path: 'oidc', type: 'oidc', accessor: undefined },
+      ]);
+      const [url, init] = fetchStub.mock.calls[0] as unknown as [URL, RequestInit];
+      expect(String(url)).toContain('/v1/sys/internal/ui/mounts');
+      expect((init.headers as Record<string, string>)['X-Vault-Token']).toBeUndefined();
+    } finally {
+      setBaoConfig({ token: 'test-token' });
+    }
+  });
+});
+
 describe('response wrapping / one-time share links', () => {
   it('builds and parses fragment-based share links without leaking the token to the path', () => {
     const token = 'hvs.CAESIJ-example.wrapping.token';

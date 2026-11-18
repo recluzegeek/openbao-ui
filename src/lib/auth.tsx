@@ -21,7 +21,7 @@ interface AuthContextValue {
   namespace: string;
   error: string | null;
   loginWithToken: (token: string, address?: string, namespace?: string) => Promise<void>;
-  loginWithUserpass: (username: string, password: string, address?: string, namespace?: string) => Promise<void>;
+  loginWithUserpass: (username: string, password: string, address?: string, namespace?: string, mount?: string) => Promise<void>;
   setAddress: (address: string) => void;
   setNamespace: (namespace: string) => void;
   /** Extend the current token lease and refresh its expiry. */
@@ -127,11 +127,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const loginWithUserpass = useCallback(
-    async (username: string, password: string, nextAddress?: string, nextNamespace?: string) => {
+    async (username: string, password: string, nextAddress?: string, nextNamespace?: string, mount?: string) => {
       setError(null);
       if (nextAddress) setAddress(nextAddress);
       if (nextNamespace !== undefined) setNamespace(nextNamespace);
-      const result = await bao.loginUserpass(username, password);
+      const result = await bao.loginUserpass(username, password, mount);
       setBaoConfig({ token: result.auth.client_token });
       const identityResult = await refreshIdentity();
       if (!identityResult.ok) {

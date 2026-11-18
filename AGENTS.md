@@ -102,6 +102,7 @@ and wired into `capabilityPathsForSecret()` / `capabilityPathsForFolder()`.
 - `onboarding-banner` / `onboarding-open` / `onboarding-dismiss` — first-run hint on `/secrets`
 - `shortcuts-open` / `shortcuts-dialog` / `shortcut-list` — keyboard-shortcut help
 - `session-countdown` / `renew-token` — live token-lease countdown and renew control in the sidebar
+- `login-method-<kind>` / `auth-methods-detected` / `login-address` / `login-username` / `login-password` / `login-token` / `login-namespace` / `login-submit` / `oidc-notice` — sign-in form and detected auth methods
 - copy buttons use `data-testid="copy-<label>"`
 
 The dev server also exposes `GET /api/audit?path=<api path>&limit=<n>` (localhost only, dev build
@@ -138,6 +139,12 @@ countdown (`sessionSecondsLeft()` / `useSessionCountdown()` in `src/lib/session.
 five minutes). For renewable, expiring tokens a renew button POSTs `auth/token/renew-self` with no
 secret in the body, merges the new `ttl`/`expire_time` into the identity and re-checks it without
 logging the token value. Non-expiring (root / periodic) tokens show no countdown.
+
+**Auth method detection:** before sign-in the login page calls `bao.detectAuthMethods()`, an
+unauthenticated read of `sys/internal/ui/mounts`, and shows only the methods the server actually
+has. The detected `userpass` mount is threaded into `loginWithUserpass()` so a renamed mount still
+works. Methods that are not configured (e.g. OIDC) are disabled with an explanation rather than
+silently failing; the probe is best-effort, so a denied/failed detection never blocks sign-in.
 
 ## Rules for agents editing this repo
 

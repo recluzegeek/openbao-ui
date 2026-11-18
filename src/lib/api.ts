@@ -581,6 +581,23 @@ export const bao = {
   },
 
   /**
+   * Detect configured auth methods before sign-in. `sys/internal/ui/mounts`
+   * is readable without a token, so the login page can show only the methods
+   * this server actually has (and explain why the others are unavailable).
+   */
+  detectAuthMethods: async (): Promise<AuthMethodSummary[]> => {
+    const res = await request<{ data?: { auth?: Record<string, { type?: string; accessor?: string }> } }>(
+      'sys/internal/ui/mounts',
+      { unauthenticated: true },
+    );
+    return Object.entries(res.data?.auth ?? {}).map(([path, config]) => ({
+      path: path.replace(/\/$/, ''),
+      type: config?.type ?? 'unknown',
+      accessor: config?.accessor,
+    }));
+  },
+
+  /**
    * Checks real capabilities for a set of policies. A short-lived token is minted and revoked in a
    * finally block; the token value never leaves this function or enters UI state/logs.
    */
