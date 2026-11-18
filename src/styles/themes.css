@@ -16,6 +16,9 @@
   --color-border: var(--color-gray-300);
   --color-border-hover: var(--color-gray-400);
   --color-border-active: var(--color-gray-400);
+  /* Filled form fields: no hard border at rest. */
+  --color-field: var(--color-gray-100);
+  --color-field-hover: var(--color-gray-200);
 
   /* Primary Colors */
   --color-primary: var(--color-primary-600);
@@ -77,6 +80,8 @@
   --color-border: var(--color-gray-600);
   --color-border-hover: var(--color-gray-700);
   --color-border-active: var(--color-gray-300);
+  --color-field: var(--color-gray-700);
+  --color-field-hover: var(--color-gray-600);
 
   /* Primary Colors */
   --color-primary: var(--color-primary-300);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useBlocker, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { bao, BaoError, type CapabilitiesMap } from '@/lib/api';
 import { can, deniedReason } from '@/lib/capabilities';
-import { envMetadataPath, envRank, secretApiPath, secretPath } from '@/lib/baoPaths';
+import { envRank, secretApiPath, secretPath } from '@/lib/baoPaths';
 import { envFile, formatWhen, mask } from '@/lib/format';
 import { pushRecent } from '@/lib/navigationMemory';
 import { countFieldChanges, dataFromRows, rowsFromData, validateRows, type FieldRow } from '@/lib/secretForm';
@@ -45,7 +45,7 @@ import {
 } from '@/lib/secretMetadata';
 import { buildSecretTree, folderBreadcrumbs, folderInTree, secretName, validSecretPath, type SecretTreeFolder } from '@/lib/secretTree';
 import { matchesSearch } from '@/lib/searchMatch';
-import { environmentTabs, groupFieldsByPrefix } from '@/lib/secretGroups';
+import { groupFieldsByPrefix } from '@/lib/secretGroups';
 import { useAuth } from '@/lib/auth';
 import {
   capabilityPathsForFolder,
@@ -73,6 +73,16 @@ import { VersionHistoryPanel } from './VersionHistoryPanel';
 import { SecretSettingsPanel } from './SecretSettingsPanel';
 
 type Search = Record<string, string | undefined>;
+
+/** Stable key for the four scope params the URL and local state share. */
+function scopeUrlKey(value: { project?: string; env?: string; service?: string; folder?: string }) {
+  return JSON.stringify({
+    project: value.project,
+    env: value.env,
+    service: value.service,
+    folder: value.folder || undefined,
+  });
+}
 
 type EditorState = {
   mode: 'create' | 'edit';
@@ -361,9 +371,6 @@ export function SecretsPage() {
   const discovery = useLayoutDiscovery(project);
   const environments = useEnvironments(project);
   const envs = useMemo(() => [...(environments.data ?? [])].sort(envRank), [environments.data]);
-  // Discovery walks the tree and samples metadata; show that instead of an
-  // empty select, which reads as "this project has no environments".
-  const envsLoading = Boolean(project) && (discovery.isLoading || environments.isLoading);
   const [env, setEnv] = useState<string | undefined>(search.env);
   const pathsQ = useSecretPaths(project, env);
   const tree = useMemo(() => buildSecretTree(pathsQ.data ?? []), [pathsQ.data]);
@@ -429,6 +436,37 @@ export function SecretsPage() {
     }
   }, [envs, env, search.env]);
 
+  // The topbar scope switcher changes the URL rather than this component's
+  // state, and the router does not remount the page for a search change. Mirror
+  // external URL changes back into state, but ignore the URLs this page writes
+  // itself so a local click is never reverted by a stale search value.
+  const lastWrittenUrl = useRef(scopeUrlKey(search));
+  useEffect(() => {
+    const incoming = scopeUrlKey(search);
+    if (incoming === lastWrittenUrl.current) return;
+    lastWrittenUrl.current = incoming;
+    if (search.project && search.project !== project) {
+      setProject(search.project);
+      setEnv(undefined);
+      setFolder('');
+      setService(undefined);
+      setVersion(undefined);
+      return;
+    }
+    if (search.env && search.env !== env && (!envs.length || envs.includes(search.env))) {
+      setEnv(search.env);
+      setService(undefined);
+      setVersion(undefined);
+    }
+    const nextFolder = search.folder ?? '';
+    if (nextFolder !== folder) {
+      setFolder(nextFolder);
+      setService(undefined);
+      setVersion(undefined);
+    }
+    if (search.service !== service) setService(search.service);
+  }, [search, project, env, envs, folder, service]);
+
   useEffect(() => {
     if (!allPaths.length || service) return;
     const inFolder = allPaths.filter((path) => {
@@ -442,6 +480,7 @@ export function SecretsPage() {
 
   useEffect(() => {
     if (project && env) {
+      lastWrittenUrl.current = scopeUrlKey({ project, env, service, folder });
       void navigate({
         to: '/secrets',
         search: { project, env, service, folder: folder || undefined },
@@ -498,7 +537,6 @@ export function SecretsPage() {
   const filteredSecrets = folderNode.secrets.filter((path) =>
     matchesSearch([secretName(path), path, ...(fieldNamesByPath[path] ?? [])], filterText));
   const crumbs = folderBreadcrumbs(folder);
-  const envView = environmentTabs(envs, env);
   const fieldGroups = useMemo(
     () => groupFieldsByPrefix(secretQ.data?.data.data ?? {}),
     [secretQ.data],
@@ -980,89 +1018,25 @@ export function SecretsPage() {
     <div className="grid" style={{ gap: '1.1rem' }}>
       <OnboardingBanner />
 
-      <div className="control-bar">
-        <div className="field">
-          <label htmlFor="project">Project</label>
-          <select
-            id="project"
-            value={project ?? ''}
-            onChange={(event) => {
-              const next = event.target.value;
-              guardInline(() => {
-                // Reset env/folder too: keeping them across projects is the
-                // single-environment dead end (the new project has no such env).
-                setProject(next);
-                setEnv(undefined);
-                setFolder('');
-                setService(undefined);
-                setVersion(undefined);
-              });
-            }}
+      <div className="secrets-view-bar">
+        <div className="view-switch" role="group" aria-label="Secrets view">
+          <button
+            type="button"
+            aria-pressed={tab === 'env'}
+            onClick={() => guardInline(() => setTab('env'))}
+            data-testid="view-environments"
           >
-            {projects.isLoading && <option>Loading…</option>}
-            {projects.data?.map((name) => <option key={name} value={name}>{name}</option>)}
-          </select>
-        </div>
-        <div className="field" style={{ flex: 1 }}>
-          <label htmlFor="environment">Environment</label>
-          <div className="env-switcher">
-            {envs.length <= 1 ? (
-              // Always a real control, even with one environment. A plain <div>
-              // looked inert and left new users unable to tell it was selected.
-              <select
-                id="environment"
-                data-testid="environment-control"
-                value={env ?? ''}
-                disabled={envsLoading || envs.length === 0}
-                onChange={(event) => { if (event.target.value) { const next = event.target.value; guardInline(() => { setTab('env'); setEnv(next); setService(undefined); setVersion(undefined); }); } }}
-                title={envsLoading ? 'Discovering environments…' : envs.length === 0 ? 'No environment could be discovered for this project' : 'Browse this environment'}
-              >
-                {envsLoading
-                  ? <option value="">Loading environments…</option>
-                  : envs.length === 0
-                    ? <option value="">No environment</option>
-                    : envs.map((name) => <option key={name} value={name}>{name}</option>)}
-              </select>
-            ) : (
-              <div className="env-tabs" role="group" aria-label="Environment" data-testid="environment-control">
-                {envView.tabs.map((name) => {
-                  const allowed = can(caps, project ? envMetadataPath(project, name) : '', 'list');
-                  return (
-                    <button
-                      key={name}
-                      aria-pressed={tab === 'env' && env === name}
-                      onClick={() => guardInline(() => { setTab('env'); setEnv(name); setService(undefined); setVersion(undefined); })}
-                      title={allowed ? `Browse ${name}` : 'Your token cannot list this environment'}
-                    >
-                      {name}
-                    </button>
-                  );
-                })}
-                {envView.more.length > 0 && (
-                  <select
-                    aria-label="More environments"
-                    value={env && envView.more.includes(env) ? env : ''}
-                    onChange={(event) => { if (event.target.value) { const next = event.target.value; guardInline(() => { setTab('env'); setEnv(next); setService(undefined); setVersion(undefined); }); } }}
-                  >
-                    <option value="">+{envView.more.length} more</option>
-                    {envView.more.map((name) => <option key={name} value={name}>{name}</option>)}
-                  </select>
-                )}
-              </div>
-            )}
-            {/* Shared credentials are project-level, so they live in the same
-                switcher as environments instead of a separate tab row. */}
-            <button
-              type="button"
-              className={`tab ${tab === 'creds' ? 'active' : ''}`}
-              aria-pressed={tab === 'creds'}
-              data-testid="shared-credentials-tab"
-              onClick={() => guardInline(() => setTab('creds'))}
-              title="Project-level shared credentials"
-            >
-              Shared
-            </button>
-          </div>
+            Environments
+          </button>
+          <button
+            type="button"
+            aria-pressed={tab === 'creds'}
+            onClick={() => guardInline(() => setTab('creds'))}
+            data-testid="shared-credentials-tab"
+            title="Project-level shared credentials"
+          >
+            Shared credentials
+          </button>
         </div>
       </div>
 
@@ -1597,11 +1571,11 @@ export function SecretsPage() {
 
       {blocker.status === 'blocked' && (
         <Dialog
-          title="Leave this page with unsaved changes?"
+          title="Discard unsaved changes?"
           onClose={() => blocker.reset?.()}
           footer={
             <>
-              <Button variant="outlined" onClick={() => blocker.reset?.()}>Stay on this page</Button>
+              <Button variant="outlined" onClick={() => blocker.reset?.()}>Keep editing</Button>
               <Button
                 variant="danger"
                 onClick={() => {
@@ -1609,13 +1583,14 @@ export function SecretsPage() {
                   blocker.proceed?.();
                 }}
               >
-                Discard and leave
+                Discard and continue
               </Button>
             </>
           }
         >
           <p className="small muted">
             {inlineChanges.length} staged field change{inlineChanges.length === 1 ? '' : 's'} will be lost.
+            The project and environment controls change the page, so this also covers leaving it.
           </p>
         </Dialog>
       )}

@@ -1,14 +1,15 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { Activity, BookOpen, Compass, KeyRound, Keyboard, LogOut, Moon, RefreshCw, Search, Server, Shield, ShieldCheck, Sun, TerminalSquare, Trash2 } from 'lucide-react';
-import { bao, normalizeNamespace } from '@/lib/api';
+import { Activity, BookOpen, Compass, KeyRound, LogOut, Moon, RefreshCw, Search, Server, Shield, ShieldCheck, Sun, TerminalSquare, Trash2 } from 'lucide-react';
+import { bao } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useSetupStage } from '@/lib/queries';
 import { useTheme } from '@/lib/useTheme';
 import { formatTtl, tokenTtlLabel } from '@/lib/format';
 import { useSessionCountdown } from '@/lib/session';
 import { CommandPalette } from './CommandPalette';
+import { ScopeSwitcher } from './ScopeSwitcher';
 import { ShortcutsDialog } from './ShortcutsDialog';
 
 const links = [
@@ -33,16 +34,6 @@ export function AppShell() {
   const { theme, toggle } = useTheme();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [namespaceDraft, setNamespaceDraft] = useState(auth.namespace);
-  const [namespaceError, setNamespaceError] = useState<string | null>(null);
-
-  const namespacesQ = useQuery({
-    queryKey: ['namespaces', auth.address],
-    queryFn: () => bao.listNamespaces(),
-    enabled: auth.status === 'authenticated',
-    retry: false,
-    staleTime: 60_000,
-  });
 
   const healthQ = useQuery({
     queryKey: ['health', auth.address],
@@ -54,25 +45,8 @@ export function AppShell() {
   });
 
   useEffect(() => {
-    setNamespaceDraft(auth.namespace);
-    setNamespaceError(null);
-  }, [auth.namespace]);
-
-  useEffect(() => {
     if (auth.status === 'anonymous') void navigate({ to: '/login', replace: true });
   }, [auth.status, navigate]);
-
-  function applyNamespace(event?: FormEvent) {
-    event?.preventDefault();
-    try {
-      const next = normalizeNamespace(namespaceDraft);
-      setNamespaceError(null);
-      setNamespaceDraft(next);
-      if (next !== auth.namespace) auth.setNamespace(next);
-    } catch (error) {
-      setNamespaceError(error instanceof Error ? error.message : 'Invalid namespace');
-    }
-  }
 
   // Global keyboard shortcuts. Typing in a field takes priority so secret values
   // are never intercepted, and ⌘K stays owned by the command palette.
@@ -203,10 +177,13 @@ export function AppShell() {
 
       <div className="main">
         <header className="topbar">
-          <div className="topbar__title">
-            <h1>{links.find((link) => link.to === pathname)?.label ?? 'Secrets'}</h1>
-            <p>Manage secrets, codes and machine access in one place</p>
-          </div>
+          {pathname === '/secrets' || pathname === '/' ? (
+            <ScopeSwitcher />
+          ) : (
+            <div className="topbar__title">
+              <h1>{links.find((link) => link.to === pathname)?.label ?? 'Secrets'}</h1>
+            </div>
+          )}
           <div className="topbar__actions">
             <button
               className="btn btn--outlined btn--small topbar__search"
@@ -216,36 +193,6 @@ export function AppShell() {
             >
               <Search size={15} /> <span>Search</span> <kbd>⌘K</kbd>
             </button>
-            <button
-              className="icon-btn"
-              onClick={() => setShortcutsOpen(true)}
-              aria-label="Keyboard shortcuts"
-              title="Keyboard shortcuts (?)"
-              data-testid="shortcuts-open"
-            >
-              <Keyboard size={17} />
-            </button>
-            <form className="namespace-control" onSubmit={applyNamespace} title={namespaceError ?? 'A namespace is a tenant-like partition. Leave empty for the root namespace; changes apply only when you click Apply.'}>
-              <label className="small muted" htmlFor="namespace" title="A namespace isolates policies, secrets and auth behind one path.">Namespace</label>
-              <input
-                id="namespace"
-                aria-label="OpenBao namespace"
-                aria-invalid={Boolean(namespaceError)}
-                data-testid="namespace-input"
-                list="namespace-options"
-                placeholder="root"
-                value={namespaceDraft}
-                onChange={(event) => setNamespaceDraft(event.target.value)}
-                onKeyDown={(event) => { if (event.key === 'Enter') applyNamespace(); }}
-              />
-              <datalist id="namespace-options">
-                {(namespacesQ.data ?? []).map((name) => <option key={name} value={name} />)}
-              </datalist>
-              <button type="submit" className="btn btn--ghost btn--small" data-testid="namespace-apply" disabled={namespaceDraft === auth.namespace}>
-                Apply
-              </button>
-            </form>
-            {namespaceError && <span className="small" role="alert" style={{ color: 'var(--color-red)' }}>{namespaceError}</span>}
             <button className="icon-btn" onClick={toggle} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} title="Toggle theme">
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>

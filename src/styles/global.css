@@ -32,6 +32,31 @@ button { cursor: pointer; }
   border-radius: var(--radius-sm);
 }
 
+/* Modern filled fields: no hard border at rest, a soft fill that deepens on
+   hover, and a focus ring drawn with box-shadow instead of an outline. */
+input:where(:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'])),
+select,
+textarea {
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background-color: var(--color-field);
+  color: var(--color-text-primary);
+}
+input:where(:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'])):hover,
+select:hover,
+textarea:hover {
+  background-color: var(--color-field-hover);
+}
+input:where(:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color'])):focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  background-color: var(--color-surface);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--color-focus) 22%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--color-focus) 55%, transparent);
+}
+
 [hidden] { display: none !important; }
 
 .app-shell {
@@ -121,12 +146,33 @@ button { cursor: pointer; }
 .topbar__title h1 { font-size: 1.15rem; }
 .topbar__title p { font-size: 0.78rem; color: var(--color-text-muted); }
 .topbar__actions { display: flex; align-items: center; gap: 0.6rem; }
-.namespace-control { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
-.namespace-control input {
-  width: 130px; padding: 0.4rem 0.6rem; border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg); background: var(--color-background); color: var(--color-text-primary);
+
+/* Project/environment scope in the topbar, replacing the page title. */
+.scope-switcher { display: flex; align-items: center; gap: 0.5rem; margin-right: auto; min-width: 0; }
+.scope-select {
+  position: relative; display: inline-flex; align-items: center; gap: 0.45rem;
+  height: 40px; padding: 0 2rem 0 0.7rem; border-radius: 10px;
+  background: var(--color-field); color: var(--color-text-primary); cursor: pointer;
+  transition: background-color 140ms ease, box-shadow 140ms ease;
 }
-.namespace-control input[aria-invalid='true'] { border-color: var(--color-red); }
+.scope-select:hover { background: var(--color-field-hover); }
+.scope-select:focus-within {
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--color-focus) 22%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--color-focus) 55%, transparent);
+}
+.scope-select > svg:first-child { color: var(--color-text-muted); flex: none; }
+.scope-select__label {
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--color-text-muted); white-space: nowrap;
+}
+.scope-select select {
+  appearance: none; min-width: 0; max-width: 220px;
+  padding: 0; border: 0; background: transparent; box-shadow: none;
+  color: var(--color-text-primary); font-weight: 600; cursor: pointer;
+}
+.scope-select select:focus { outline: none; box-shadow: none; }
+.scope-select__chevron { position: absolute; right: 0.6rem; color: var(--color-text-muted); pointer-events: none; }
 
 .page { padding: var(--spacing-xl); max-width: 1600px; width: 100%; margin: 0 auto; }
 .page__header { display: flex; align-items: flex-end; gap: var(--spacing-md); flex-wrap: wrap; margin-bottom: var(--spacing-lg); }
@@ -139,14 +185,23 @@ button { cursor: pointer; }
   border: 1px solid var(--color-border); border-radius: var(--radius-xl);
   margin-bottom: var(--spacing-lg);
 }
+/* Project and environment moved to the topbar; this keeps the Shared view
+   reachable without a second, competing scope control. */
+.secrets-view-bar { display: flex; justify-content: flex-start; }
+.view-switch { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--color-field); }
+.view-switch button {
+  border: 0; background: transparent; color: var(--color-text-secondary);
+  padding: 0.4rem 0.85rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600;
+}
+.view-switch button:hover { color: var(--color-text-primary); }
+.view-switch button[aria-pressed='true'] { background: var(--color-surface); color: var(--color-text-primary); box-shadow: var(--shadow-sm); }
 .field { display: grid; gap: 0.3rem; min-width: 170px; }
 .field label, .control-bar label { font-size: 0.75rem; font-weight: 600; color: var(--color-text-secondary); }
 .field select, .field input, .control-bar select, .control-bar input {
-  width: 100%; padding: 0.55rem 0.7rem; border: 1px solid var(--color-border);
-  border-radius: 8px; background: var(--color-background);
+  width: 100%; padding: 0.55rem 0.7rem;
+  border-radius: 10px;
   color: var(--color-text-primary); min-height: 40px;
 }
-.field select:hover, .control-bar select:hover { border-color: var(--color-border-hover); }
 .field__error { color: var(--color-red); font-size: 0.75rem; margin: 0; }
 .filter-bar { align-items: flex-end; }
 .filter-bar__scope { display: flex; align-items: flex-end; gap: var(--spacing-sm); flex-wrap: wrap; }
@@ -228,8 +283,8 @@ button { cursor: pointer; }
 .folder-filter svg { color: var(--color-text-muted); flex: none; }
 .folder-filter input {
   flex: 1; min-width: 0; min-height: 32px; padding: 0.35rem 0.5rem;
-  border: 1px solid var(--color-border); border-radius: 8px;
-  background: var(--color-background); color: var(--color-text-primary); font-size: 0.82rem;
+  border-radius: 8px;
+  color: var(--color-text-primary); font-size: 0.82rem;
 }
 .folder-filter .link-btn { font-size: 0.75rem; flex: none; }
 
@@ -322,8 +377,8 @@ button { cursor: pointer; }
 .secret-field__editor { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
 .secret-field__editor input {
   flex: 1; min-width: 0; min-height: 36px; padding: 0.4rem 0.55rem;
-  border: 1px solid var(--color-primary); border-radius: var(--radius-md);
-  background: var(--color-background); color: var(--color-text-primary); font-size: 0.82rem;
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary); font-size: 0.82rem;
 }
 .inline-add {
   display: grid; grid-template-columns: minmax(110px, 0.8fr) minmax(140px, 1.4fr) auto auto;
@@ -331,8 +386,8 @@ button { cursor: pointer; }
 }
 .inline-add input {
   min-width: 0; min-height: 36px; padding: 0.4rem 0.55rem;
-  border: 1px solid var(--color-border); border-radius: var(--radius-md);
-  background: var(--color-background); color: var(--color-text-primary); font-size: 0.82rem;
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary); font-size: 0.82rem;
 }
 .inline-change-bar {
   position: sticky; bottom: 0; z-index: 3;
@@ -368,8 +423,8 @@ button { cursor: pointer; }
   gap: 0.5rem; align-items: center;
 }
 .field-editor__row input {
-  width: 100%; min-width: 0; padding: 0.55rem 0.7rem; border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg); background: var(--color-background); color: var(--color-text-primary);
+  width: 100%; min-width: 0; padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-lg); color: var(--color-text-primary);
 }
 
 .code-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--spacing-md); }
@@ -571,8 +626,8 @@ button { cursor: pointer; }
 .field-table__row:last-child { border-bottom: 0; }
 .field-table__cell { min-width: 0; display: grid; gap: 0.3rem; }
 .field-table__cell input, .field-table__cell textarea {
-  width: 100%; min-width: 0; padding: 0.5rem 0.6rem; border: 1px solid var(--color-border);
-  border-radius: var(--radius-md); background: var(--color-background); color: var(--color-text-primary); font-size: 0.8rem;
+  width: 100%; min-width: 0; padding: 0.5rem 0.6rem;
+  border-radius: var(--radius-md); color: var(--color-text-primary); font-size: 0.8rem;
 }
 .field-table__cell textarea { resize: vertical; line-height: 1.45; }
 .field-table__masked {
