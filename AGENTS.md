@@ -98,6 +98,7 @@ and wired into `capabilityPathsForSecret()` / `capabilityPathsForFolder()`.
 - `approle-create` / `approle-confirm` / `approle-confirm-name` / `approle-confirm-create` / `approle-result` / `approle-result-name` / `approle-result-role-id` / `approle-result-secret` / `approle-result-done` — real AppRole creation and show-once secret ID
 - `share-link-panel` / `wrap-ttl` / `create-share-link` / `share-link-dialog` / `share-link-value` / `share-link-done` — one-time link creation (For agents page)
 - `unwrap-page` / `unwrap-reveal` / `unwrap-success` / `unwrap-source` / `unwrap-fields` / `unwrap-field-<key>` — one-time link recipient view
+- `kv-mount-browser` / `kv-mount-picker` / `kv-mount-version` / `kv-list-path` / `kv-browser-path` / `kv-browser-browse` / `kv-mounts-refresh` / `kv-browser-entry-<key>` / `kv-browser-fields` / `kv-browser-field-<key>` / `kv-browser-snippet-cli` / `kv-browser-snippet-http` — universal KV v1/v2 mount browser (For agents page)
 - `audit-search` / `audit-actor` / `audit-operation` / `audit-range` — audit filters; `audit-table` / `audit-entry-<n>` — results
 - `welcome-page` — getting-started guide (`data-stage` = derived server stage); `welcome-step-<id>` — checklist steps
 - `onboarding-banner` / `onboarding-open` / `onboarding-dismiss` — first-run hint on `/secrets`
@@ -140,6 +141,15 @@ countdown (`sessionSecondsLeft()` / `useSessionCountdown()` in `src/lib/session.
 five minutes). For renewable, expiring tokens a renew button POSTs `auth/token/renew-self` with no
 secret in the body, merges the new `ttl`/`expire_time` into the identity and re-checks it without
 logging the token value. Non-expiring (root / periodic) tokens show no countdown.
+
+**KV mount picker:** the For agents page discovers KV mounts through `sys/internal/ui/mounts`
+(`bao.listKvMountsDetailed()`, `useKvMounts()`) and offers a universal path browser that works on any
+mount. `src/lib/kvMounts.ts` centralizes the version-aware paths: v2 LISTs `<mount>/metadata/` and
+reads `<mount>/data/<path>`; v1 LISTs `<mount>/` and reads `<mount>/<path>`. The browser shows only
+field names (values masked), gates list/read with `kvBrowserCapabilityPaths()`, and generates
+credential-free snippets with the selected mount via the optional `mount` argument to the snippet
+generators in `src/lib/snippets.ts`. The rest of the console still uses the conventional `kv/` v2
+mount and its project/env layout.
 
 **AppRole creation:** the machine-identity wizard can write a real AppRole. It enables `sys/auth/approle`
 only when needed (gated by `appRoleCapabilityPaths()` in `src/lib/queries.ts`), posts the role to

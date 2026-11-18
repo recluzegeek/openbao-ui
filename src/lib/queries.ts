@@ -13,6 +13,7 @@ import {
 import { environmentMarkerPath, ENVIRONMENT_MARKER, inferLayout, type ClassifiedSecret, type LayoutProfile } from './layout';
 import { registerProjectLayout } from './layoutResolver';
 import { deriveSetupStage } from './setup';
+import { kvDataPath, kvListPath, type KvMountInfo } from './kvMounts';
 
 const METADATA_SAMPLE = 80;
 
@@ -416,6 +417,17 @@ export function useEntities() {
 
 export function useAuthMethods() {
   return useQuery({ queryKey: ['auth-methods'], queryFn: () => bao.listAuthMethods(), staleTime: 60_000 });
+}
+
+/** All KV mounts (v1 + v2) for the universal mount browser. */
+export function useKvMounts() {
+  return useQuery({ queryKey: ['kv-mounts'], queryFn: () => bao.listKvMountsDetailed(), staleTime: 60_000 });
+}
+
+/** Capability probes for browsing a version-aware KV mount. */
+export function kvBrowserCapabilityPaths(mount?: KvMountInfo, logical = ''): string[] {
+  if (!mount) return ['sys/internal/ui/mounts'];
+  return [kvListPath(mount, logical), kvDataPath(mount, '__new__')];
 }
 
 /** Paths checked to decide whether policy editing and simulation are available. */

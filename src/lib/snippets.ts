@@ -1,40 +1,44 @@
 import { envFile } from './format';
+import { DEFAULT_KV_MOUNT, kvDataField, kvDataPath, type KvMountInfo } from './kvMounts';
 
-export function baoCliSnippet(dataPath: string): string {
-  // dataPath is an API path under kv/data, e.g. roomsss/env/development/app
-  const kvPath = dataPath.replace(/^kv\/data\//, '');
-  return `bao kv get -mount=kv -format=json ${kvPath}`;
+/** Strip the conventional v2 data prefix so callers can pass API paths or bare logical paths. */
+function logical(dataPath: string): string {
+  return dataPath.replace(/^kv\/data\//, '');
 }
 
-export function curlSnippet(dataPath: string): string {
+/** All snippet generators are credential-free: the token always comes from the caller's environment. */
+export function baoCliSnippet(dataPath: string, mount: KvMountInfo = DEFAULT_KV_MOUNT): string {
+  return `bao kv get -mount=${mount.path} -format=json ${logical(dataPath)}`;
+}
+
+export function curlSnippet(dataPath: string, mount: KvMountInfo = DEFAULT_KV_MOUNT): string {
   return [
     `# BAO_TOKEN comes from your login/identity provider — never commit it`,
     `curl -fsS \\`,
     `  -H "X-Vault-Token: $BAO_TOKEN" \\`,
-    `  "$BAO_ADDR/v1/kv/data/${dataPath}" \\`,
-    `  | jq -r '.data.data'`,
+    `  "$BAO_ADDR/v1/${kvDataPath(mount, logical(dataPath))}" \\`,
+    `  | jq -r '.${kvDataField(mount)}'`,
   ].join('\n');
 }
 
-export function envPullSnippet(dataPath: string): string {
-  const kvPath = dataPath.replace(/^kv\/data\//, '');
+export function envPullSnippet(dataPath: string, mount: KvMountInfo = DEFAULT_KV_MOUNT): string {
   return [
     `# Writes a 0600 .env from the selected secret`,
-    `bao kv get -mount=kv -format=json ${kvPath} \\`,
-    `  | jq -r '.data.data | to_entries[] | "\\(.key)=\\(.value|@sh)"' > .env`,
+    `bao kv get -mount=${mount.path} -format=json ${logical(dataPath)} \\`,
+    `  | jq -r '.${kvDataField(mount)} | to_entries[] | "\\(.key)=\\(.value|@sh)"' > .env`,
     `chmod 600 .env`,
   ].join('\n');
 }
 
-export function githubActionsSnippet(dataPath: string): string {
-  const kvPath = dataPath.replace(/^kv\/data\//, '');
+export function githubActionsSnippet(dataPath: string, mount: KvMountInfo = DEFAULT_KV_MOUNT): string {
+  const path = logical(dataPath);
   return [
-    `- name: Read ${kvPath} from OpenBao`,
+    `- name: Read ${path} from OpenBao`,
     `  env:`,
     `    BAO_ADDR: \${{ vars.BAO_ADDR }}`,
     `  run: |`,
     `    bao login -method=oidc -role=github-actions`,
-    `    bao kv get -mount=kv -format=json ${kvPath} > config.json`,
+    `    bao kv get -mount=${mount.path} -format=json ${path} > config.json`,
   ].join('\n');
 }
 

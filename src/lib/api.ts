@@ -1,5 +1,6 @@
 import type { AuditResponse } from './audit';
 import { runbookApiPath } from './baoPaths';
+import { kvMountsFromMap, type KvMountInfo, type MountConfig } from './kvMounts';
 
 const KEYS = {
   address: 'console.bao.address',
@@ -392,6 +393,15 @@ export const bao = {
       .filter(([, config]) => config?.type === 'kv' && config?.options?.version === '2')
       .map(([path]) => path.replace(/\/$/, ''));
   },
+
+  /** All KV mounts (v1 and v2) from `sys/internal/ui/mounts`, for the universal browser. */
+  listKvMountsDetailed: async (): Promise<KvMountInfo[]> => {
+    const res = await request<{ data?: { secret?: Record<string, unknown> } }>('sys/internal/ui/mounts');
+    return kvMountsFromMap(res.data?.secret as Record<string, MountConfig> | undefined);
+  },
+
+  /** Read a secret at a full, version-aware API path (used by the universal browser). */
+  readKvPath: (apiPath: string) => request<{ data?: Record<string, unknown> }>(apiPath),
 
   listProjects: async () => {
     const res = await bao.list('kv/metadata/');

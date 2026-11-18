@@ -2,13 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { can, canAny, deniedReason } from './capabilities';
 import { envRank, parseTotpAccount, runbookApiPath, runbookMetadataPath, secretPath, totpCodePath } from './baoPaths';
 import { envFile, formatTtl, parsePeriod, secondsUntil, shellQuote, tokenTtlLabel } from './format';
-import { baoCliSnippet, curlSnippet } from './snippets';
+import { baoCliSnippet, curlSnippet, envPullSnippet } from './snippets';
 import { dataFromRows, fieldNameError, rowsFromData, validSecretName, validateRows } from './secretForm';
 import { bao, normalizeNamespace, request, setBaoConfig } from './api';
 import { mergeEffectivePolicies } from './auth';
 import { sessionSecondsLeft } from './session';
 import { shareLinkFor, validWrapTtl, wrappingTokenFromHash } from './wrapping';
-import { appRoleCapabilityPaths, capabilityPathsForFolder, capabilityPathsForSecret, environmentCreationTarget, runbookCapabilityPaths } from './queries';
+import { appRoleCapabilityPaths, capabilityPathsForFolder, capabilityPathsForSecret, environmentCreationTarget, kvBrowserCapabilityPaths, runbookCapabilityPaths } from './queries';
+import { kvDataField, kvDataPath, kvListPath, kvMountsFromMap, kvSupportsVersions, type KvMountInfo } from './kvMounts';
 import { environmentMarkerPath, inferLayout, physicalPath, type ClassifiedSecret, type LayoutProfile } from './layout';
 import { clearProjectLayouts, registerProjectLayout, resolveApiPath, resolveEnvMetadataPath, toLogicalPath } from './layoutResolver';
 import { actorLabel, auditCsv, auditPathHref, filterAuditEntries, operationLabel, type AuditEntry, type AuditFilters } from './audit';
@@ -1039,5 +1040,50 @@ describe('secret lifecycle', () => {
     expect(canAny(map, 'kv/undelete/a', ['update', 'create'])).toBe(true);
     expect(canAny(map, 'kv/destroy/a', ['update', 'create'])).toBe(false);
     expect(canAny(undefined, 'kv/undelete/a', ['update'])).toBe(false);
+  });
+});
+
+describe('KV mount picker protocol (v1/v2)', () => {
+  it('discovers KV mounts from sys/internal/ui/mounts and ignores non-KV engines', () => {
+    expect(kvMountsFromMap({
+      'kv/': { type: 'kv', options: { version: '2' }, description: 'default' },
+      'legacy/': { type: 'kv', options: { version: '1' } },
+      'pki/': { type: 'pki', options: { version: '' } },
+    })).toEqual([
+      { path: 'kv', version: 2, description: 'default' },
+      { path: 'legacy', version: 1, description: undefined },
+    ]);
+  });
+
+  it('builds version-aware list/data paths', () => {
+    const v2: KvMountInfo = { path: 'kv', version: 2 };
+    const v1: KvMountInfo = { path: 'legacy', version: 1 };
+    expect(kvListPath(v2, '')).toBe('kv/metadata/');
+    expect(kvListPath(v2, 'app/prod')).toBe('kv/metadata/app/prod/');
+    expect(kvDataPath(v2, 'app/prod')).toBe('kv/data/app/prod');
+    expect(kvListPath(v1, '')).toBe('legacy/');
+    expect(kvListPath(v1, 'app')).toBe('legacy/app/');
+    expect(kvDataPath(v1, 'app')).toBe('legacy/app');
+    expect(kvSupportsVersions(v2)).toBe(true);
+    expect(kvSupportsVersions(v1)).toBe(false);
+    expect(kvDataField(v2)).toBe('data.data');
+    expect(kvDataField(v1)).toBe('data');
+  });
+
+  it('probes capabilities for a selected mount and folder', () => {
+    const v1: KvMountInfo = { path: 'legacy', version: 1 };
+    expect(kvBrowserCapabilityPaths()).toEqual(['sys/internal/ui/mounts']);
+    expect(kvBrowserCapabilityPaths(v1, 'app')).toEqual(['legacy/app/', 'legacy/__new__']);
+  });
+
+  it('generates mount-aware snippets without embedding secret values', () => {
+    const v1: KvMountInfo = { path: 'legacy', version: 1 };
+    expect(baoCliSnippet('app', v1)).toBe('bao kv get -mount=legacy -format=json app');
+    expect(curlSnippet('app', v1)).toContain('/v1/legacy/app');
+    expect(curlSnippet('app', v1)).toContain("'.data'");
+    expect(envPullSnippet('app', v1)).toContain("-mount=legacy");
+    expect(envPullSnippet('app', v1)).toContain(".data |");
+    // Defaults preserved for existing v2 callers.
+    expect(baoCliSnippet('roomsss/env/development/app')).toBe('bao kv get -mount=kv -format=json roomsss/env/development/app');
   });
 });

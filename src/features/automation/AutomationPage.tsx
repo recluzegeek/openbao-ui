@@ -18,6 +18,7 @@ import {
 import { Badge } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
 import { CodeSnippet, CopyButton, Dialog, EmptyState } from '@/components/common/Extras';
+import { KvMountBrowser } from './KvMountBrowser';
 
 const CAPABILITIES = ['create', 'read', 'update', 'patch', 'delete', 'list', 'sudo'];
 
@@ -79,6 +80,8 @@ export function AutomationPage() {
         </div>
         <Badge variant="primary"><Bot size={13} /> machine-friendly</Badge>
       </div>
+
+      <KvMountBrowser />
 
       <div className="grid grid--split">
         <div className="grid" style={{ gap: '1rem' }}>
