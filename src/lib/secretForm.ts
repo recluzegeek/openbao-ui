@@ -21,11 +21,22 @@ export function dataFromRows(rows: FieldRow[]): Record<string, string> {
   return data;
 }
 
+/** Field names become KV data keys, so reject characters that break tooling and snippets. */
+export function fieldNameError(key: string): string | null {
+  const name = key.trim();
+  if (!name) return 'Every field needs a name.';
+  if (!/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(name)) {
+    return 'Use letters, numbers, _, . or -; start with a letter, number or _.';
+  }
+  return null;
+}
+
 export function validateRows(rows: FieldRow[]): string | null {
   const seen = new Set<string>();
   for (const row of rows) {
     const key = row.key.trim();
-    if (!key) return 'Every field needs a name.';
+    const invalid = fieldNameError(key);
+    if (invalid) return invalid;
     if (seen.has(key)) return `Duplicate field name: ${key}`;
     seen.add(key);
   }

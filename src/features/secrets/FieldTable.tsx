@@ -4,7 +4,7 @@ import { Badge } from '@/components/common/Badge';
 import { CopyButton } from '@/components/common/Extras';
 import { mask } from '@/lib/format';
 import { findReferences, resolveReferences } from '@/lib/secretFormats';
-import type { FieldRow } from '@/lib/secretForm';
+import { fieldNameError, type FieldRow } from '@/lib/secretForm';
 
 interface FieldTableProps {
   rows: FieldRow[];
@@ -25,6 +25,11 @@ export function FieldTable({
 }: FieldTableProps) {
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const nameCounts = rows.reduce<Record<string, number>>((counts, row) => {
+    const name = row.key.trim();
+    if (name) counts[name] = (counts[name] ?? 0) + 1;
+    return counts;
+  }, {});
 
   return (
     <div className="field-table" data-testid="field-table">
@@ -41,6 +46,10 @@ export function FieldTable({
         const resolved = references.length ? resolveReferences(row.value, lookup) : '';
         const hasOverride = Object.prototype.hasOwnProperty.call(overrides, row.key);
         const hasComment = Boolean(comments[row.key]?.trim());
+        const name = row.key.trim();
+        const nameError = fieldNameError(row.key)
+          ?? (name && nameCounts[name] > 1 ? 'Duplicate field name.' : null);
+        const showNameError = Boolean(name && nameError);
         return (
           <div className="field-table__row" key={row.id} data-testid={`edit-row-${row.key || 'new'}`}>
             <div className="field-table__cell field-table__cell--key">
@@ -49,8 +58,12 @@ export function FieldTable({
                 className="mono"
                 placeholder="FIELD_NAME"
                 value={row.key}
+                aria-invalid={showNameError}
                 onChange={(event) => onRowChange(row.id, { key: event.target.value })}
               />
+              {showNameError && (
+                <span className="field-table__error" role="alert" data-testid={`field-error-${name}`}>{nameError}</span>
+              )}
               {references.length > 0 && (
                 <span className="field-table__hint" title={`References ${references.join(', ')}`}>
                   <Link2 size={12} /> {references.length} reference{references.length > 1 ? 's' : ''}

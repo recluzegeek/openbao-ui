@@ -390,6 +390,8 @@ button { cursor: pointer; }
 .field-table__row-actions { display: flex; gap: 0.2rem; }
 .field-table__row-actions .icon-btn { width: 26px; height: 26px; }
 .field-table__hint { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.68rem; color: var(--color-primary); }
+.field-table__error { display: block; font-size: 0.7rem; color: var(--color-error, #b42318); margin-top: 0.2rem; }
+.field-table__cell--key input[aria-invalid="true"] { border-color: var(--color-error, #b42318); }
 .field-table__badges { display: flex; flex-wrap: wrap; gap: 0.25rem; }
 .field-table__details {
   grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

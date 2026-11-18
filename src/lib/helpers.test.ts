@@ -3,7 +3,7 @@ import { can, deniedReason } from './capabilities';
 import { envRank, parseTotpAccount, runbookApiPath, runbookMetadataPath, secretPath, totpCodePath } from './baoPaths';
 import { envFile, formatTtl, parsePeriod, secondsUntil, shellQuote, tokenTtlLabel } from './format';
 import { baoCliSnippet, curlSnippet } from './snippets';
-import { dataFromRows, rowsFromData, validSecretName, validateRows } from './secretForm';
+import { dataFromRows, fieldNameError, rowsFromData, validSecretName, validateRows } from './secretForm';
 import { bao, normalizeNamespace, request, setBaoConfig } from './api';
 import { mergeEffectivePolicies } from './auth';
 import { capabilityPathsForFolder, capabilityPathsForSecret, environmentCreationTarget, runbookCapabilityPaths } from './queries';
@@ -85,6 +85,16 @@ describe('secret editor', () => {
     expect(validSecretName('a/b')).toBe(false);
     expect(validSecretName('..')).toBe(false);
     expect(validSecretName('   ')).toBe(false);
+  });
+
+  it('rejects invalid field names before saving', () => {
+    expect(fieldNameError('DATABASE_URL')).toBeNull();
+    expect(fieldNameError('api.timeout')).toBeNull();
+    expect(fieldNameError('bad key!')).toMatch(/letters, numbers/i);
+    expect(fieldNameError('1st place')).toMatch(/letters, numbers/i);
+    expect(fieldNameError('-leading')).toMatch(/start with/i);
+    expect(fieldNameError('a/b')).toMatch(/letters, numbers/i);
+    expect(validateRows([{ id: 'x', key: 'bad key!', value: 'v' }])).toMatch(/letters, numbers/i);
   });
 
   it('probes a new-secret path so create capability can be gated', () => {
@@ -228,6 +238,18 @@ describe('secret annotations', () => {
     expect(parseAnnotations(written).overrides).toHaveProperty('root');
     expect(effectiveValue('PASSWORD', 'stored', overridesFor(annotations, 'ui-manager'))).toBe('local');
     expect(effectiveValue('HOST', 'stored', {})).toBe('stored');
+  });
+
+  it('omits empty custom_metadata values so the metadata write cannot fail', () => {
+    const empty = parseAnnotations(undefined);
+    const written = mergeAnnotations({ rotation_notes: 'keep me' }, empty);
+    expect(written.rotation_notes).toBe('keep me');
+    expect('ui_note' in written).toBe(false);
+    expect(parseAnnotations(written).note).toBe('');
+    const withNote = mergeAnnotations(undefined, { ...empty, note: 'Rotate weekly' });
+    expect(withNote.ui_note).toBe('Rotate weekly');
+    // Clearing a note removes the key rather than writing an empty value.
+    expect('ui_note' in mergeAnnotations(withNote, empty)).toBe(false);
   });
 
   it('ignores malformed metadata instead of crashing', () => {
@@ -555,6 +577,50 @@ describe('session hardening', () => {
     } as unknown as Response);
     expect(await request('kv/metadata/empty/', { list: true })).toEqual({ data: null });
     expect(fetchStub).toHaveBeenCalled();
+  });
+
+  it('patches a secret with HTTP PATCH on the data endpoint', async () => {
+    setBaoConfig({ token: 'test-token' });
+    const fetchStub = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => '{"data":{"data":{},"metadata":{"version":3}}}',
+    } as unknown as Response);
+    await bao.patchSecret('tgc/env/development/app', { PORT: '8080' });
+    const [url, init] = fetchStub.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(String(url)).toContain('/v1/kv/data/tgc/env/development/app');
+    expect(init.method).toBe('PATCH');
+    expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/merge-patch+json');
+    const body = JSON.parse(String(init.body));
+    expect(body).toEqual({ data: { PORT: '8080' }, options: {} });
+  });
+
+  it('falls back to read-then-write when PATCH is not permitted', async () => {
+    setBaoConfig({ token: 'test-token' });
+    const fetchStub = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({
+        ok: false, status: 403, text: async () => '{"errors":["permission denied"]}',
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        text: async () => '{"data":{"data":{"HOST":"db","PORT":"5432"},"metadata":{"version":2}}}',
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        text: async () => '{"data":{"data":{},"metadata":{"version":3}}}',
+      } as unknown as Response);
+    await bao.patchSecret('tgc/env/development/app', { PORT: '8080' });
+    expect(fetchStub).toHaveBeenCalledTimes(3);
+    const [readUrl, readInit] = fetchStub.mock.calls[1] as unknown as [URL, RequestInit];
+    expect(String(readUrl)).toContain('/v1/kv/data/tgc/env/development/app');
+    expect(readInit.method).toBe('GET');
+    const [writeUrl, writeInit] = fetchStub.mock.calls[2] as unknown as [URL, RequestInit];
+    expect(String(writeUrl)).toContain('/v1/kv/data/tgc/env/development/app');
+    expect(writeInit.method).toBe('POST');
+    expect(JSON.parse(String(writeInit.body))).toEqual({
+      data: { HOST: 'db', PORT: '8080' },
+      options: { cas: 2 },
+    });
   });
 });
 

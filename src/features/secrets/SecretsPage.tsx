@@ -228,7 +228,6 @@ export function SecretsPage() {
     mode: 'create' | 'edit';
     name: string;
     rows: FieldRow[];
-    cas: number;
     annotations: SecretAnnotations;
     baseMetadata: Record<string, string>;
   } | null>(null);
@@ -433,7 +432,6 @@ export function SecretsPage() {
       mode: 'create',
       name: folder ? `${folder}/` : '',
       rows: [{ id: 'new-0', key: '', value: '' }],
-      cas: 0,
       annotations: { tags: [], note: '', comments: {}, overrides: {} },
       baseMetadata: {},
     });
@@ -451,7 +449,6 @@ export function SecretsPage() {
         mode: 'edit',
         name: service,
         rows: rowsFromData(latest.data.data),
-        cas: latest.data.metadata.version,
         annotations: parseAnnotations(meta.data.custom_metadata),
         baseMetadata: meta.data.custom_metadata ?? {},
       });
@@ -475,27 +472,49 @@ export function SecretsPage() {
     setSaving(true);
     setEditorError(null);
     try {
-      // bao.writeSecret() adds the kv/data/ prefix, so pass the bare API path.
+      // bao path helpers add their own prefixes; pass the bare API path.
       const bare = secretApiPath(project, env, name);
-      await bao.writeSecret(bare, dataFromRows(editor.rows), editor.cas);
-      const custom = mergeAnnotations(editor.baseMetadata, editor.annotations);
+      const data = dataFromRows(editor.rows);
+      if (editor.mode === 'edit') {
+        // PATCH writes only the fields we send and never trips a stale CAS, so
+        // a retry after a partial failure cannot block or corrupt the save.
+        await bao.patchSecret(bare, data);
+      } else {
+        // CAS 0 makes creation fail instead of overwriting an existing secret.
+        await bao.writeSecret(bare, data, 0);
+      }
+
+      // Metadata is a separate KV endpoint. Keep it best-effort and report the
+      // outcome honestly: a metadata failure does not mean the data was lost.
+      let annotationsSaved = !canWriteMeta;
       if (canWriteMeta) {
-        await bao.writeCustomMetadata(bare, custom);
-      } else if (Object.values(custom).some((value) => value && value !== '[]' && value !== '{}' && value !== '')) {
-        addToast('info', 'Values saved, annotations skipped', 'Your token cannot write KV metadata; tags, comments and overrides were not stored.');
+        try {
+          await bao.writeCustomMetadata(bare, mergeAnnotations(editor.baseMetadata, editor.annotations));
+          annotationsSaved = true;
+        } catch {
+          annotationsSaved = false;
+        }
       }
       await queryClient.invalidateQueries();
-      addToast(
-        'success',
-        editor.mode === 'create' ? 'Secret created' : 'Secret saved',
-        `kv/data/${bare} · version ${editor.cas + 1}`,
-      );
+      if (annotationsSaved) {
+        addToast('success', editor.mode === 'create' ? 'Secret created' : 'Secret saved', `kv/data/${bare} · values saved`);
+      } else {
+        addToast(
+          'warning',
+          'Values saved, annotations skipped',
+          canWriteMeta
+            ? 'The secret data was written, but KV metadata could not be updated.'
+            : 'Your token cannot write KV metadata; tags, comments and overrides were not stored.',
+        );
+      }
       setService(name);
       setFolder(name.includes('/') ? name.slice(0, name.lastIndexOf('/')) : '');
       setVersion(undefined);
       setEditor(null);
       setDialog(null);
     } catch (error) {
+      // With PATCH (and CAS 0 for creates) a retry cannot hit a stale-version
+      // conflict, so the original error is safe to show as-is.
       setEditorError(error instanceof Error ? error.message : 'Save failed');
     } finally {
       setSaving(false);
@@ -796,7 +815,7 @@ export function SecretsPage() {
                 loading={saving}
                 disabled={saving}
               >
-                {editor.mode === 'create' ? 'Create secret' : `Save version ${editor.cas + 1}`}
+                {editor.mode === 'create' ? 'Create secret' : 'Save changes'}
               </Button>
             </>
           }
@@ -878,7 +897,7 @@ export function SecretsPage() {
           <div className="notice small">
             {editor.mode === 'create'
               ? 'Check-and-set: this create only succeeds if the name is still unused (CAS 0).'
-              : `Check-and-set: this save only succeeds if version ${editor.cas} is still current. If someone changes it first, you'll get a conflict instead of an overwrite.`}
+              : 'This save patches only the fields you changed, so a concurrent edit to a different field cannot cause a conflict.'}
             {' '}Values go to KV data; tags, comments and personal overrides go to KV custom metadata. Your token and the write are recorded in the audit log.
             {!canWriteMeta && ' Your token cannot write metadata, so annotations will be skipped.'}
           </div>

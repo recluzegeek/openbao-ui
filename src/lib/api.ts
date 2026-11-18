@@ -95,6 +95,8 @@ interface RequestOptions {
   unauthenticated?: boolean;
   /** Override the token for one request, e.g. while testing a login. */
   token?: string;
+  /** Override the request Content-Type (KV PATCH needs application/merge-patch+json). */
+  contentType?: string;
 }
 
 export async function request<T>(apiPath: string, options: RequestOptions = {}): Promise<T> {
@@ -111,7 +113,7 @@ export async function request<T>(apiPath: string, options: RequestOptions = {}):
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (token) headers['X-Vault-Token'] = token;
   if (config.namespace) headers['X-Vault-Namespace'] = config.namespace;
-  if (options.data !== undefined) headers['Content-Type'] = 'application/json';
+  if (options.data !== undefined) headers['Content-Type'] = options.contentType ?? 'application/json';
 
   let response: Response;
   try {
@@ -370,6 +372,26 @@ export const bao = {
       method: 'POST',
       data: { data, options: cas === undefined ? {} : { cas } },
     }),
+  /**
+   * KV v2 JSON merge patch (same wire call as `bao kv patch`). Only the fields
+   * we send are touched, so a concurrent edit to a different field cannot trip
+   * a stale CAS conflict. Falls back to read-then-write when the token lacks
+   * the `patch` capability (403) or the server is too old to support PATCH (405).
+   */
+  patchSecret: async (path: string, data: Record<string, unknown>) => {
+    try {
+      return await request<KVResponse>(`kv/data/${path}`, {
+        method: 'PATCH',
+        data: { data, options: {} },
+        contentType: 'application/merge-patch+json',
+      });
+    } catch (error) {
+      if (!(error instanceof BaoError) || (error.status !== 403 && error.status !== 405)) throw error;
+      const current = await bao.readSecret(path);
+      const merged = { ...(current.data?.data ?? {}), ...data };
+      return bao.writeSecret(path, merged, current.data?.metadata?.version);
+    }
+  },
 
   /**
    * Create an environment by writing a reserved marker secret at its physical

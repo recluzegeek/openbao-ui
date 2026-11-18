@@ -45,18 +45,25 @@ export function parseAnnotations(custom?: Record<string, string>): SecretAnnotat
   };
 }
 
-/** Keep unknown custom_metadata keys intact when writing UI annotations back. */
+/**
+ * Keep unknown custom_metadata keys intact when writing UI annotations back.
+ * Empty values are omitted: OpenBao rejects empty custom_metadata values, and
+ * an empty ui_note used to make the whole metadata step fail after the secret
+ * data had already been written.
+ */
 export function mergeAnnotations(
   base: Record<string, string> | undefined,
   annotations: SecretAnnotations,
 ): Record<string, string> {
-  return {
+  const merged: Record<string, string> = {
     ...(base ?? {}),
     ui_tags: JSON.stringify(annotations.tags),
-    ui_note: annotations.note,
     ui_comments: JSON.stringify(annotations.comments),
     ui_overrides: JSON.stringify(annotations.overrides),
   };
+  if (annotations.note.trim()) merged.ui_note = annotations.note;
+  else delete merged.ui_note;
+  return merged;
 }
 
 export function overridesFor(annotations: SecretAnnotations, identity: string): Record<string, string> {
