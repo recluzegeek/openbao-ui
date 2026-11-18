@@ -1,10 +1,35 @@
 import { defineConfig, type Plugin } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { execFile } from 'node:child_process';
+import dns from 'node:dns';
+import http from 'node:http';
+import https from 'node:https';
 import { promisify } from 'node:util';
 import { fileURLToPath, URL } from 'node:url';
 
 const execFileAsync = promisify(execFile);
+
+/** Retry transient DNS failures (EAI_AGAIN) so the dev proxy survives a flaky resolver. */
+function resilientLookup(hostname: string, options: unknown, callback: (...args: any[]) => void): void {
+  let attempt = 0;
+  const tryLookup = () => {
+    dns.lookup(hostname, options as dns.LookupOptions, (error, address, family) => {
+      if (error && (error as NodeJS.ErrnoException).code === 'EAI_AGAIN' && attempt < 4) {
+        attempt += 1;
+        setTimeout(tryLookup, 150 * attempt);
+        return;
+      }
+      callback(error, address, family);
+    });
+  };
+  tryLookup();
+}
+
+const baoTarget = process.env.VITE_BAO_TARGET || 'http://127.0.0.1:8200';
+const lookup = resilientLookup as http.AgentOptions['lookup'];
+const baoAgent = baoTarget.startsWith('https://')
+  ? new https.Agent({ lookup })
+  : new http.Agent({ lookup });
 
 interface AuditRow {
   type?: string;
@@ -113,8 +138,9 @@ export default defineConfig({
     // Dev-only proxy: keeps OpenBao requests same-origin so no CORS config is needed.
     proxy: {
       '/v1': {
-        target: process.env.VITE_BAO_TARGET || 'http://127.0.0.1:8200',
+        target: baoTarget,
         changeOrigin: true,
+        agent: baoAgent,
       },
     },
   },
