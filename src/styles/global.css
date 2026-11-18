@@ -397,6 +397,16 @@ button { cursor: pointer; }
 .version-row__actions { display: flex; align-items: center; gap: 0.25rem; }
 .mini-btn { display: inline-grid; place-items: center; min-width: 26px; height: 26px; padding: 0 0.25rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-background); color: var(--color-text-secondary); font-size: 0.72rem; cursor: pointer; }
 .mini-btn:hover, .mini-btn.active { border-color: var(--color-primary); color: var(--color-selected-fg); background: var(--color-primary-light); }
+.mini-btn--danger { color: var(--color-red, #b42318); border-color: var(--color-red-300, #fda29b); }
+.mini-btn--danger:hover { background: var(--color-red-100, #fee4e2); border-color: var(--color-red, #b42318); color: var(--color-red, #b42318); }
+.field-error { display: block; font-size: 0.7rem; color: var(--color-error, #b42318); margin-top: 0.2rem; }
+.field input[aria-invalid="true"], .field select[aria-invalid="true"] { border-color: var(--color-error, #b42318); }
+
+/* Trash: soft-deleted versions recovered from KV metadata (no values shown). */
+.trash-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.7rem 0.2rem; border-bottom: 1px dashed var(--color-border); }
+.trash-row:last-of-type { border-bottom: 0; }
+.trash-row__main { display: grid; gap: 0.2rem; min-width: 0; flex: 1; }
+.trash-row__actions { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; justify-content: flex-end; }
 .diff-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
 .diff-head h4 { margin: 0; font-size: 0.85rem; }
 .diff-table { border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; }

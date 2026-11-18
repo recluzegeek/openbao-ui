@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { bao } from './api';
+import { bao, type KVDeletedVersion } from './api';
 import {
   envMetadataPath,
   metadataPath,
@@ -214,6 +214,48 @@ export function useSecretMetadata(project?: string, env?: string, service?: stri
   });
 }
 
+/**
+ * Soft-deleted versions across a project, built from KV metadata only — never
+ * reads version data, so a Trash view cannot surface a secret value. Capped and
+ * batched so a large mount cannot freeze the browser.
+ */
+export function useProjectTrash(project?: string) {
+  const discovery = useLayoutDiscovery(project);
+  return useQuery<KVDeletedVersion[]>({
+    queryKey: ['project-trash', project, discovery.data?.profile.kind ?? 'pending'],
+    enabled: Boolean(project) && (discovery.isSuccess || discovery.isError),
+    staleTime: 15_000,
+    retry: false,
+    queryFn: async () => {
+      const paths = [...new Set(
+        discovery.data?.classified.map((secret) => secret.physical).filter(Boolean) ?? [],
+      )].slice(0, 300);
+      const found: KVDeletedVersion[] = [];
+      for (let index = 0; index < paths.length; index += 12) {
+        const chunk = paths.slice(index, index + 12);
+        const results = await Promise.allSettled(
+          chunk.map((path) => bao.readMetadata(path).then((meta) => ({ path, meta }))),
+        );
+        for (const result of results) {
+          if (result.status !== 'fulfilled') continue;
+          const { path, meta } = result.value;
+          for (const [version, info] of Object.entries(meta.data.versions ?? {})) {
+            if (info.deletion_time && !info.destroyed) {
+              found.push({
+                path,
+                version: Number(version),
+                deletionTime: info.deletion_time,
+                createdTime: info.created_time,
+              });
+            }
+          }
+        }
+      }
+      return found.sort((a, b) => b.deletionTime.localeCompare(a.deletionTime));
+    },
+  });
+}
+
 export function useCapabilities(paths: string[]) {
   const key = [...paths].sort().join('|');
   return useQuery({
@@ -227,6 +269,17 @@ export function useCapabilities(paths: string[]) {
   });
 }
 
+/** Every ACL path a single secret's actions can touch, including version lifecycle. */
+export function lifecycleCapabilityPaths(physical: string): string[] {
+  return [
+    `kv/data/${physical}`,
+    `kv/metadata/${physical}`,
+    `kv/delete/${physical}`,
+    `kv/undelete/${physical}`,
+    `kv/destroy/${physical}`,
+  ];
+}
+
 export function capabilityPathsForSecret(project?: string, env?: string, service?: string, allEnvs: string[] = []) {
   if (!project || !env || !service) return [];
   return [
@@ -234,6 +287,7 @@ export function capabilityPathsForSecret(project?: string, env?: string, service
     secretPath(project, env, service),
     // Probe path for "New secret": ACL wildcards answer the same as a real new path.
     `kv/data/${capabilityProbePath(project, env, [], '')}`,
+    ...lifecycleCapabilityPaths(secretApiPath(project, env, service)),
     ...allEnvs.filter((e) => e !== env).map((e) => secretPath(project, e, service)),
     ...allEnvs.map((e) => envMetadataPath(project, e)),
   ];
@@ -278,7 +332,7 @@ export function capabilityPathsForFolder(
     `kv/data/${probe}`,
     `kv/metadata/${probe}`,
     ...allPaths.map((path) => secretPath(project, env, path)),
-    ...allPaths.map((path) => `kv/metadata/${secretApiPath(project, env, path)}`),
+    ...allPaths.flatMap((path) => lifecycleCapabilityPaths(secretApiPath(project, env, path))),
     ...allEnvs.filter((name) => name !== env).map((name) => envMetadataPath(project, name)),
   ];
 }

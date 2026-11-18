@@ -3,6 +3,7 @@ import { AppShell } from '@/components/layout/AppShell';
 import { EmptyState } from '@/components/common/Extras';
 import { LoginPage } from '@/features/auth/LoginPage';
 import { SecretsPage } from '@/features/secrets/SecretsPage';
+import { TrashPage } from '@/features/secrets/TrashPage';
 import { CodesPage } from '@/features/totp/CodesPage';
 import { AutomationPage } from '@/features/automation/AutomationPage';
 import { RunbooksPage } from '@/features/runbooks/RunbooksPage';
@@ -43,6 +44,15 @@ const secretsRoute = createRoute({
     env: typeof search.env === 'string' ? search.env : undefined,
     service: typeof search.service === 'string' ? search.service : undefined,
     folder: typeof search.folder === 'string' ? search.folder : undefined,
+  }),
+});
+
+const trashRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/trash',
+  component: TrashPage,
+  validateSearch: (search: Record<string, unknown>) => ({
+    project: typeof search.project === 'string' ? search.project : undefined,
   }),
 });
 
@@ -110,7 +120,7 @@ const accessRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
-  appRoute.addChildren([indexRoute, secretsRoute, searchRoute, codesRoute, automationRoute, runbooksRoute, accessRoute, auditRoute, welcomeRoute]),
+  appRoute.addChildren([indexRoute, secretsRoute, trashRoute, searchRoute, codesRoute, automationRoute, runbooksRoute, accessRoute, auditRoute, welcomeRoute]),
 ]);
 
 export const router = createRouter({

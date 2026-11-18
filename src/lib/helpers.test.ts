@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { can, deniedReason } from './capabilities';
+import { can, canAny, deniedReason } from './capabilities';
 import { envRank, parseTotpAccount, runbookApiPath, runbookMetadataPath, secretPath, totpCodePath } from './baoPaths';
 import { envFile, formatTtl, parsePeriod, secondsUntil, shellQuote, tokenTtlLabel } from './format';
 import { baoCliSnippet, curlSnippet } from './snippets';
@@ -15,6 +15,7 @@ import { environmentTabs, groupFieldsByPrefix } from './secretGroups';
 import { buildReferenceLookup, findReferences, parseKeyValueText, resolveReferences, serializeKeyValue } from './secretFormats';
 import { effectiveValue, mergeAnnotations, overridesFor, parseAnnotations, withOverridesFor } from './secretMetadata';
 import { actorForVersion, diffData } from './secretDiff';
+import { deletedVersions, durationError, versionSettingsFrom, versionState } from './secretLifecycle';
 import { isFavorite, loadFavorites, loadRecent, pushRecent, secretHref, toggleFavorite } from './navigationMemory';
 import {
   discoveredParents,
@@ -103,6 +104,13 @@ describe('secret editor', () => {
     expect(paths).toContain('kv/data/ui-demo/env/development/__new__');
     expect(paths).toContain('kv/data/ui-demo/env/development/web');
     expect(paths).toContain('kv/data/ui-demo/env/staging/web');
+  });
+
+  it('includes every lifecycle ACL path so Trash actions fail closed', () => {
+    const paths = capabilityPathsForSecret('ui-demo', 'development', 'web');
+    for (const prefix of ['kv/data/', 'kv/metadata/', 'kv/delete/', 'kv/undelete/', 'kv/destroy/']) {
+      expect(paths).toContain(`${prefix}ui-demo/env/development/web`);
+    }
   });
 });
 
@@ -623,6 +631,75 @@ describe('session hardening', () => {
       options: { cas: 2 },
     });
   });
+
+  it('sends a CAS option when a cas-required secret is patched', async () => {
+    setBaoConfig({ token: 'test-token' });
+    const fetchStub = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => '{"data":{"data":{},"metadata":{"version":4}}}',
+    } as unknown as Response);
+    await bao.patchSecret('a/b', { X: '1' }, 3);
+    const [, init] = fetchStub.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({ data: { X: '1' }, options: { cas: 3 } });
+  });
+
+  it('uses the correct KV v2 lifecycle endpoints and payloads', async () => {
+    setBaoConfig({ token: 'test-token' });
+    const fetchStub = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true, status: 204, text: async () => '',
+    } as unknown as Response);
+
+    await bao.softDeleteVersions('a/b', [1, 2]);
+    await bao.undeleteVersions('a/b', [1]);
+    await bao.destroyVersions('a/b', [2]);
+    await bao.deleteLatestVersion('a/b');
+    await bao.deleteSecretMetadata('a/b');
+
+    const calls = fetchStub.mock.calls.map(([url, init]) => ({
+      path: String(url).split('/v1/')[1],
+      method: (init as RequestInit).method,
+      body: (init as RequestInit).body ? JSON.parse(String((init as RequestInit).body)) : undefined,
+      contentType: ((init as RequestInit).headers as Record<string, string>)['Content-Type'],
+    }));
+    expect(calls).toEqual([
+      { path: 'kv/delete/a/b', method: 'POST', body: { versions: [1, 2] }, contentType: 'application/json' },
+      { path: 'kv/undelete/a/b', method: 'POST', body: { versions: [1] }, contentType: 'application/json' },
+      { path: 'kv/destroy/a/b', method: 'PUT', body: { versions: [2] }, contentType: 'application/json' },
+      { path: 'kv/data/a/b', method: 'DELETE', body: undefined, contentType: undefined },
+      { path: 'kv/metadata/a/b', method: 'DELETE', body: undefined, contentType: undefined },
+    ]);
+  });
+
+  it('resets zero-value version settings via a full POST that preserves annotations', async () => {
+    setBaoConfig({ token: 'test-token' });
+    const fetchStub = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        text: async () => JSON.stringify({
+          data: {
+            max_versions: 7, cas_required: true, delete_version_after: '30d',
+            custom_metadata: { owner: 'team-a' }, versions: {},
+          },
+        }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({ ok: true, status: 204, text: async () => '' } as unknown as Response);
+
+    // A merge-patch cannot reset these to zero, so the facade reads then POSTs
+    // the complete settings object with custom_metadata preserved.
+    await bao.patchMetadataSettings('a/b', { delete_version_after: '0s', max_versions: 0 });
+    const calls = fetchStub.mock.calls.map(([url, init]) => ({
+      path: String(url).split('/v1/')[1],
+      method: (init as RequestInit).method ?? 'GET',
+      body: (init as RequestInit).body ? JSON.parse(String((init as RequestInit).body)) : undefined,
+    }));
+    expect(calls[0]).toEqual({ path: 'kv/metadata/a/b', method: 'GET', body: undefined });
+    expect(calls[1]).toEqual({
+      path: 'kv/metadata/a/b',
+      method: 'POST',
+      body: { custom_metadata: { owner: 'team-a' }, max_versions: 0, cas_required: true, delete_version_after: '0s' },
+    });
+  });
 });
 
 describe('runbook paths', () => {
@@ -755,5 +832,51 @@ describe('secrets presentation', () => {
     });
     expect(environmentTabs(envs, undefined, 2).tabs).toEqual(['development', 'staging']);
     expect(environmentTabs(['only'])).toEqual({ tabs: ['only'], more: [] });
+  });
+});
+
+describe('secret lifecycle', () => {
+  const versions = {
+    '1': { created_time: '2026-01-01T00:00:00Z', deletion_time: '2026-01-03T00:00:00Z' },
+    '2': { created_time: '2026-01-02T00:00:00Z', destroyed: true },
+    '3': { created_time: '2026-01-03T00:00:00Z' },
+  };
+
+  it('classifies version state with destroyed taking priority over deleted', () => {
+    expect(versionState(3, versions['3'], 3)).toBe('current');
+    expect(versionState(2, versions['2'], 3)).toBe('destroyed');
+    expect(versionState(1, versions['1'], 3)).toBe('deleted');
+    expect(versionState(1, { created_time: 'x' }, 3)).toBe('older');
+  });
+
+  it('lists only recoverable deleted versions, newest first', () => {
+    expect(deletedVersions(versions)).toEqual([{
+      version: 1,
+      deletedAt: '2026-01-03T00:00:00Z',
+      createdAt: '2026-01-01T00:00:00Z',
+    }]);
+    expect(deletedVersions({})).toEqual([]);
+  });
+
+  it('validates delete_version_after durations and defaults settings', () => {
+    expect(durationError('')).toBeNull();
+    expect(durationError('0s')).toBeNull();
+    expect(durationError('30d')).toBeNull();
+    expect(durationError('1h30m')).toBeNull();
+    expect(durationError('2h45m10s')).toBeNull();
+    expect(durationError('30 days')).toContain('Use a duration');
+    expect(durationError('forever')).toContain('Use a duration');
+    expect(durationError('1h30')).toContain('Use a duration');
+    expect(versionSettingsFrom({})).toEqual({ maxVersions: 0, casRequired: false, deleteVersionAfter: '0s' });
+    expect(versionSettingsFrom({ max_versions: 5, cas_required: true, delete_version_after: '7d' })).toEqual({
+      maxVersions: 5, casRequired: true, deleteVersionAfter: '7d',
+    });
+  });
+
+  it('allows lifecycle actions through either update or create capability', () => {
+    const map = { 'kv/undelete/a': ['create'], 'kv/destroy/a': ['deny'] };
+    expect(canAny(map, 'kv/undelete/a', ['update', 'create'])).toBe(true);
+    expect(canAny(map, 'kv/destroy/a', ['update', 'create'])).toBe(false);
+    expect(canAny(undefined, 'kv/undelete/a', ['update'])).toBe(false);
   });
 });

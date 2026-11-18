@@ -66,6 +66,7 @@ import { RecentActivityPanel } from './RecentActivityPanel';
 import { CompareEnvsPanel } from './CompareEnvsPanel';
 import { FieldTable } from './FieldTable';
 import { VersionHistoryPanel } from './VersionHistoryPanel';
+import { SecretSettingsPanel } from './SecretSettingsPanel';
 
 type Search = Record<string, string | undefined>;
 
@@ -518,9 +519,13 @@ export function SecretsPage() {
       const bare = secretApiPath(project, env, name);
       const data = dataFromRows(editor.rows);
       if (editor.mode === 'edit') {
-        // PATCH writes only the fields we send and never trips a stale CAS, so
-        // a retry after a partial failure cannot block or corrupt the save.
-        await bao.patchSecret(bare, data);
+        // PATCH writes only the fields we send, so a retry after a partial
+        // failure cannot block or corrupt the save. If this key has
+        // cas-required, pass a freshly read version so concurrent writes still
+        // produce a conflict instead of a silent overwrite.
+        const casRequired = metadataQ.data?.data.cas_required;
+        const cas = casRequired ? (await bao.readSecret(bare)).data.metadata.version : undefined;
+        await bao.patchSecret(bare, data, cas);
       } else {
         // CAS 0 makes creation fail instead of overwriting an existing secret.
         await bao.writeSecret(bare, data, 0);
@@ -840,7 +845,12 @@ export function SecretsPage() {
                 selectedVersion={version}
                 onSelectVersion={setVersion}
                 canRestore={writable}
+                caps={caps}
               />
+            )}
+
+            {project && env && service && (
+              <SecretSettingsPanel project={project} env={env} service={service} caps={caps} />
             )}
 
             <RecentActivityPanel path={apiPath || undefined} />
@@ -1019,7 +1029,9 @@ export function SecretsPage() {
           <div className="notice small">
             {editor.mode === 'create'
               ? 'Check-and-set: this create only succeeds if the name is still unused (CAS 0).'
-              : 'This save patches only the fields you changed, so a concurrent edit to a different field cannot cause a conflict.'}
+              : metadataQ.data?.data.cas_required
+                ? 'This key requires check-and-set: the save uses the current version and reports a conflict if another write lands first.'
+                : 'This save patches only the fields you changed, so a concurrent edit to a different field cannot cause a conflict.'}
             {' '}Values go to KV data; tags, comments and personal overrides go to KV custom metadata. Your token and the write are recorded in the audit log.
             {!canWriteMeta && ' Your token cannot write metadata, so annotations will be skipped.'}
           </div>

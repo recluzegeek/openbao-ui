@@ -202,9 +202,23 @@ export interface KVResponse {
 export interface KVMetadataResponse {
   data: {
     current_version: number;
+    oldest_version?: number;
+    /** 0 means "use the mount default" (normally 10 versions). */
+    max_versions?: number;
+    cas_required?: boolean;
+    delete_version_after?: string;
     versions: Record<string, { created_time: string; deletion_time?: string; destroyed?: boolean }>;
     custom_metadata?: Record<string, string>;
   };
+}
+
+/** A soft-deleted version; data is still recoverable until it is destroyed. */
+export interface KVDeletedVersion {
+  /** Bare API path, e.g. `securus/backend/development/db`. */
+  path: string;
+  version: number;
+  deletionTime: string;
+  createdTime: string;
 }
 
 export interface ListResponse {
@@ -378,11 +392,11 @@ export const bao = {
    * a stale CAS conflict. Falls back to read-then-write when the token lacks
    * the `patch` capability (403) or the server is too old to support PATCH (405).
    */
-  patchSecret: async (path: string, data: Record<string, unknown>) => {
+  patchSecret: async (path: string, data: Record<string, unknown>, cas?: number) => {
     try {
       return await request<KVResponse>(`kv/data/${path}`, {
         method: 'PATCH',
-        data: { data, options: {} },
+        data: { data, options: cas === undefined ? {} : { cas } },
         contentType: 'application/merge-patch+json',
       });
     } catch (error) {
@@ -391,6 +405,47 @@ export const bao = {
       const merged = { ...(current.data?.data ?? {}), ...data };
       return bao.writeSecret(path, merged, current.data?.metadata?.version);
     }
+  },
+
+  /* KV v2 version lifecycle. All paths are bare (the kv/ prefix is added here). */
+
+  /** Soft-delete the latest version. It can be restored with undelete. */
+  deleteLatestVersion: (path: string) =>
+    request<void>(`kv/data/${path}`, { method: 'DELETE' }),
+  /** Soft-delete specific versions (CLI: `bao kv delete -versions=...`). */
+  softDeleteVersions: (path: string, versions: number[]) =>
+    request<void>(`kv/delete/${path}`, { method: 'POST', data: { versions } }),
+  /** Restore soft-deleted versions (CLI: `bao kv undelete -versions=...`). */
+  undeleteVersions: (path: string, versions: number[]) =>
+    request<void>(`kv/undelete/${path}`, { method: 'POST', data: { versions } }),
+  /** Permanently remove version data (CLI: `bao kv destroy -versions=...`). */
+  destroyVersions: (path: string, versions: number[]) =>
+    request<void>(`kv/destroy/${path}`, { method: 'PUT', data: { versions } }),
+  /** Permanently remove the key, all versions and its metadata. */
+  deleteSecretMetadata: (path: string) =>
+    request<void>(`kv/metadata/${path}`, { method: 'DELETE' }),
+  /**
+   * Update per-secret version settings without dropping annotations or other
+   * settings. OpenBao's JSON merge-patch silently ignores zero values such as
+   * `delete_version_after: "0s"` and `max_versions: 0`, so a PATCH cannot reset
+   * a key to the mount defaults. Read the current metadata and issue a full
+   * POST, preserving custom_metadata and every setting the caller omits.
+   */
+  patchMetadataSettings: async (
+    path: string,
+    settings: { max_versions?: number; cas_required?: boolean; delete_version_after?: string },
+  ) => {
+    const current = await bao.readMetadata(path);
+    const existing = current.data;
+    return request<void>(`kv/metadata/${path}`, {
+      method: 'POST',
+      data: {
+        custom_metadata: existing.custom_metadata ?? {},
+        max_versions: settings.max_versions ?? existing.max_versions ?? 0,
+        cas_required: settings.cas_required ?? existing.cas_required ?? false,
+        delete_version_after: settings.delete_version_after ?? existing.delete_version_after ?? '0s',
+      },
+    });
   },
 
   /**

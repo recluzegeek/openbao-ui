@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import { useQueries, useQueryClient } from '@tanstack/react-query';
-import { GitCompareArrows, History, RotateCcw } from 'lucide-react';
-import { bao } from '@/lib/api';
+import { Archive, ExternalLink, Flame, GitCompareArrows, History, RotateCcw, Trash2, Undo2 } from 'lucide-react';
+import { bao, type CapabilitiesMap } from '@/lib/api';
 import { secretApiPath } from '@/lib/baoPaths';
+import { canAny } from '@/lib/capabilities';
 import { formatWhen, mask } from '@/lib/format';
-import { useAuditTrail, useSecretMetadata } from '@/lib/queries';
+import { lifecycleCapabilityPaths, useAuditTrail, useSecretMetadata } from '@/lib/queries';
 import { actorForVersion, diffData, type FieldDiff } from '@/lib/secretDiff';
+import { versionState } from '@/lib/secretLifecycle';
 import { useToast } from '@/lib/toast';
 import { Badge } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
@@ -19,7 +22,13 @@ interface VersionHistoryPanelProps {
   selectedVersion?: number;
   onSelectVersion: (version?: number) => void;
   canRestore: boolean;
+  caps?: CapabilitiesMap;
 }
+
+type PendingAction = {
+  kind: 'delete' | 'undelete' | 'destroy' | 'purge';
+  version?: number;
+};
 
 const STATUS_LABELS: Record<FieldDiff['status'], string> = {
   added: 'added',
@@ -29,10 +38,11 @@ const STATUS_LABELS: Record<FieldDiff['status'], string> = {
 };
 
 export function VersionHistoryPanel({
-  project, env, service, apiPath, selectedVersion, onSelectVersion, canRestore,
+  project, env, service, apiPath, selectedVersion, onSelectVersion, canRestore, caps,
 }: VersionHistoryPanelProps) {
   const { addToast } = useToast();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const metaQ = useSecretMetadata(project, env, service);
   const audit = useAuditTrail(apiPath);
   const [revealed, setRevealed] = useState(false);
@@ -41,12 +51,26 @@ export function VersionHistoryPanel({
   const [right, setRight] = useState<number>();
   const [restoreVersion, setRestoreVersion] = useState<number | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [pending, setPending] = useState<PendingAction | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const [dataPath, metaPath, deletePath, undeletePath, destroyPath] =
+    lifecycleCapabilityPaths(secretApiPath(project, env, service));
+  const canSoftDelete = canAny(caps, dataPath, ['delete']);
+  const canDeleteVersion = canAny(caps, deletePath, ['update', 'create']);
+  const canUndelete = canAny(caps, undeletePath, ['update', 'create']);
+  const canDestroy = canAny(caps, destroyPath, ['update', 'create']);
+  const canPurge = canAny(caps, metaPath, ['delete']);
 
   const versions = useMemo(
     () => Object.keys(metaQ.data?.data.versions ?? {}).map(Number).sort((a, b) => b - a),
     [metaQ.data],
   );
   const current = metaQ.data?.data.current_version;
+  const deletedCount = versions.filter((version) => {
+    const meta = metaQ.data?.data.versions[String(version)];
+    return Boolean(meta?.deletion_time) && !meta?.destroyed;
+  }).length;
   const versionKey = versions.join(',');
 
   useEffect(() => {
@@ -90,12 +114,75 @@ export function VersionHistoryPanel({
     }
   }
 
+  async function applyLifecycle() {
+    if (!pending) return;
+    setBusy(true);
+    const api = secretApiPath(project, env, service);
+    try {
+      if (pending.kind === 'delete') {
+        if (pending.version === undefined || pending.version === current) await bao.deleteLatestVersion(api);
+        else await bao.softDeleteVersions(api, [pending.version]);
+        addToast('success', `Version ${pending.version ?? current} moved to Trash`, 'Recoverable until it is destroyed.');
+      } else if (pending.kind === 'undelete') {
+        await bao.undeleteVersions(api, [pending.version!]);
+        addToast('success', `Restored version ${pending.version}`, 'The version is readable again.');
+      } else if (pending.kind === 'destroy') {
+        await bao.destroyVersions(api, [pending.version!]);
+        addToast('success', `Destroyed version ${pending.version}`, 'This cannot be undone.');
+      } else {
+        await bao.deleteSecretMetadata(api);
+        addToast('success', 'Secret permanently deleted', 'All versions and annotations were removed.');
+        onSelectVersion(undefined);
+      }
+      await queryClient.invalidateQueries();
+      setPending(null);
+    } catch (error) {
+      addToast('error', 'Action failed', error instanceof Error ? error.message : undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const pendingTitle = !pending ? '' : {
+    delete: `Move version ${pending.version ?? current} to Trash?`,
+    undelete: `Restore version ${pending.version}?`,
+    destroy: `Destroy version ${pending.version} permanently?`,
+    purge: 'Delete this secret permanently?',
+  }[pending.kind];
+  const pendingCopy = !pending ? '' : {
+    delete: 'The version is marked deleted and hidden from reads. Its data stays recoverable from Trash until you destroy it.',
+    undelete: 'The version becomes readable again. OpenBao may reapply its delete-version-after policy.',
+    destroy: 'The version data is permanently removed from storage. This cannot be undone.',
+    purge: 'All versions, key metadata and annotations are removed. Even Trash cannot recover them. This cannot be undone.',
+  }[pending.kind];
+
   return (
-    <div className="panel">
+    <div className="panel" data-testid="version-history">
       <div className="panel__head">
         <History size={17} />
         <h3>Version history</h3>
         {current && <Badge size="small">v{current}</Badge>}
+        {deletedCount > 0 && (
+          <button
+            className="link-btn small"
+            data-testid="open-trash"
+            onClick={() => void navigate({ to: '/trash', search: { project } })}
+            title="Open the Trash view for this project"
+          >
+            {deletedCount} in Trash <ExternalLink size={12} />
+          </button>
+        )}
+        {canPurge && (
+          <button
+            className="icon-btn"
+            aria-label="Delete secret and all versions permanently"
+            title="Delete secret and all versions permanently"
+            data-testid="purge-secret"
+            onClick={() => setPending({ kind: 'purge' })}
+          >
+            <Trash2 size={15} />
+          </button>
+        )}
       </div>
       <div className="panel__body">
         {metaQ.isLoading && <div className="state"><div className="spinner" /></div>}
@@ -104,6 +191,7 @@ export function VersionHistoryPanel({
         {versions.map((version) => {
           const meta = metaQ.data!.data.versions[String(version)];
           const actor = actorForVersion(entries, meta.created_time);
+          const state = versionState(version, meta, current);
           return (
             <div className={`version-row ${selectedVersion === version || (selectedVersion === undefined && version === current) ? 'selected' : ''}`} key={version} data-testid={`version-${version}`}>
               <button
@@ -111,15 +199,35 @@ export function VersionHistoryPanel({
                 onClick={() => onSelectVersion(version === current ? undefined : version)}
                 title="View this point in time"
               >
-                <span className="list-item__title">Version {version}{meta.destroyed ? ' · destroyed' : ''}</span>
+                <span className="list-item__title">
+                  Version {version}
+                  {state === 'deleted' && <Badge size="small" variant="warning">in trash</Badge>}
+                  {state === 'destroyed' && <Badge size="small" variant="danger">destroyed</Badge>}
+                </span>
                 <span className="list-item__sub">
                   {formatWhen(meta.created_time)}
                   {actor ? ` · by ${actor}` : ''}
+                  {state === 'deleted' && meta.deletion_time ? ` · deleted ${formatWhen(meta.deletion_time)}` : ''}
                 </span>
               </button>
               <span className="version-row__actions">
                 <button className={`mini-btn ${left === version ? 'active' : ''}`} onClick={() => setLeft(version)} title="Use as left side of diff">A</button>
                 <button className={`mini-btn ${right === version ? 'active' : ''}`} onClick={() => setRight(version)} title="Use as right side of diff">B</button>
+                {state === 'deleted' && canUndelete && (
+                  <button className="mini-btn" onClick={() => setPending({ kind: 'undelete', version })} title={`Restore version ${version}`} aria-label={`Undelete version ${version}`} data-testid={`undelete-${version}`}>
+                    <Undo2 size={13} />
+                  </button>
+                )}
+                {state === 'deleted' && canDestroy && (
+                  <button className="mini-btn mini-btn--danger" onClick={() => setPending({ kind: 'destroy', version })} title={`Destroy version ${version} permanently`} aria-label={`Destroy version ${version}`} data-testid={`destroy-${version}`}>
+                    <Flame size={13} />
+                  </button>
+                )}
+                {(state === 'older' && canDeleteVersion || state === 'current' && canSoftDelete) && (
+                  <button className="mini-btn" onClick={() => setPending({ kind: 'delete', version })} title={`Move version ${version} to Trash`} aria-label={`Delete version ${version}`} data-testid={`delete-version-${version}`}>
+                    <Archive size={13} />
+                  </button>
+                )}
                 {version !== current && canRestore && (
                   <button className="mini-btn" onClick={() => setRestoreVersion(version)} title={`Restore version ${version}`} aria-label={`Restore version ${version}`}>
                     <RotateCcw size={13} />
@@ -179,6 +287,37 @@ export function VersionHistoryPanel({
             the audit log.
           </p>
           <div className="notice warning small">Anyone with read access to this path can see the restored values.</div>
+        </Dialog>
+      )}
+
+      {pending && (
+        <Dialog
+          title={pendingTitle}
+          testId="lifecycle-confirm"
+          onClose={() => { if (!busy) setPending(null); }}
+          footer={
+            <>
+              <Button variant="outlined" onClick={() => setPending(null)} disabled={busy}>Cancel</Button>
+              <Button
+                variant={pending.kind === 'destroy' || pending.kind === 'purge' ? 'danger' : 'primary'}
+                icon={pending.kind === 'undelete' ? <Undo2 size={15} /> : pending.kind === 'delete' ? <Archive size={15} /> : <Trash2 size={15} />}
+                onClick={() => void applyLifecycle()}
+                loading={busy}
+                disabled={busy}
+                data-testid="confirm-lifecycle"
+              >
+                {pending.kind === 'undelete' ? 'Restore'
+                  : pending.kind === 'delete' ? 'Move to Trash'
+                    : pending.kind === 'destroy' ? 'Destroy permanently' : 'Delete secret'}
+              </Button>
+            </>
+          }
+        >
+          <p className="small muted">{pendingCopy}</p>
+          <div className="notice warning small">
+            {pending.kind === 'delete' ? 'Soft deletes are reversible from the Trash view.'
+              : 'Your token and this change are recorded in the OpenBao audit log.'}
+          </div>
         </Dialog>
       )}
     </div>

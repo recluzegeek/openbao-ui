@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { Activity, ArrowRight, Clock3, Compass, CornerDownLeft, KeyRound, Search, Shield, Star } from 'lucide-react';
+import { Activity, ArrowRight, Clock3, Compass, CornerDownLeft, KeyRound, Search, Shield, Star, Trash2 } from 'lucide-react';
 import { folderOf, loadFavorites, loadRecent, type SecretRef } from '@/lib/navigationMemory';
 
 interface Action {
@@ -66,6 +66,13 @@ export function CommandPalette() {
         group: 'Go to',
         icon: <KeyRound size={16} />,
         run: () => void navigate({ to: '/secrets', search: { project: undefined, env: undefined, service: undefined, folder: undefined } }),
+      },
+      {
+        id: 'route-trash',
+        label: 'Trash (deleted versions)',
+        group: 'Go to',
+        icon: <Trash2 size={16} />,
+        run: () => void navigate({ to: '/trash', search: { project: undefined } }),
       },
       {
         id: 'route-search',

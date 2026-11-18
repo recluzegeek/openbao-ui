@@ -6,6 +6,11 @@ export function can(map: CapabilitiesMap | undefined, path: string, capability: 
   return caps.includes('root') || caps.includes(capability) || caps.includes('sudo');
 }
 
+/** True when any of the given capabilities is allowed on a path. */
+export function canAny(map: CapabilitiesMap | undefined, path: string, capabilities: string[]): boolean {
+  return capabilities.some((capability) => can(map, path, capability));
+}
+
 export function deniedReason(map: CapabilitiesMap | undefined, path: string, capability: string): string {
   if (!map) return 'Checking your permissions…';
   const caps = map[path] ?? map[path.replace(/\/$/, '')];

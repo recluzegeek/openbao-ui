@@ -10,6 +10,7 @@ semantic HTML, explicit `data-testid` hooks, and no hidden state.
 | `/login` | token/userpass sign-in, sealed-server unseal | — |
 | `/welcome` | getting-started checklist that follows live server state | — |
 | `/secrets` | environment-aware KV browser | `project`, `env`, `service`, `folder` |
+| `/trash` | soft-deleted KV versions recoverable from metadata (no values shown) | `project` |
 | `/search` | global key/path/project/field search, recents and favorites | `q` |
 | `/runbooks` | operational notes and related-secret links | `project` |
 | `/codes` | TOTP codes and admin actions | — |
@@ -58,6 +59,18 @@ metadata writes use the matching `kv/metadata/...` path.
 Writes use `bao.writeSecret()` with a **bare** API path (`<project>/env/<env>/<service>`) — that
 function adds the `kv/data/` prefix itself. Create passes CAS `0`; edit passes the current version.
 
+**Version lifecycle:** `kv/data/<path>` soft-deletes the latest version; `kv/delete/<path>`,
+`kv/undelete/<path>` and `kv/destroy/<path>` operate on specific versions; `kv/metadata/<path>`
+DELETE purges the key and all versions. Per-secret version settings live on `kv/metadata/<path>`.
+OpenBao's JSON merge-patch ignores zero values (`delete_version_after: "0s"`, `max_versions: 0`),
+so `patchMetadataSettings()` reads the current metadata and issues a full POST that preserves
+`custom_metadata` and every omitted setting. With `cas_required`, inline edits pass a freshly read
+CAS version; without it they PATCH so concurrent edits to other fields cannot conflict.
+
+**Trash** reads KV metadata only (`deletion_time`, `destroyed`); it never reads version data, so it
+cannot surface a secret value. Lifecycle capability paths are added in `lifecycleCapabilityPaths()`
+and wired into `capabilityPathsForSecret()` / `capabilityPathsForFolder()`.
+
 ## Useful test IDs
 
 - `field-<name>` — a secret field row
@@ -68,6 +81,10 @@ function adds the `kv/data/` prefix itself. Create passes CAS `0`; edit passes t
 - `secret-<path>` — a secret entry in the current folder
 - `compare-<env>-<key>` — a field cell in the side-by-side environment view
 - `version-<n>` — a KV version row; `version-diff` — the two-version diff table
+- `delete-version-<n>` / `undelete-<n>` / `destroy-<n>` — per-version lifecycle actions
+- `version-history` / `open-trash` / `purge-secret` / `lifecycle-confirm` / `confirm-lifecycle` — history and lifecycle UI
+- `secret-settings` / `save-version-settings` — per-secret `max_versions`, `delete_version_after`, `cas_required`
+- `trash-project` / `trash-table` / `trash-<path>-<n>` / `trash-restore-<n>` / `trash-destroy-<n>` / `trash-confirm-action` — Trash view
 - `diff-<key>` — a field row in the version diff
 - `code-<account>` / `code-value-<account>` — TOTP card and value
 - `global-search-input` — global search box; `search-hit-<key-or-path>` — a result

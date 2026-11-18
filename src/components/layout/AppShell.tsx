@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { Activity, BookOpen, Compass, KeyRound, Keyboard, LogOut, Moon, Search, Server, Shield, ShieldCheck, Sun, TerminalSquare } from 'lucide-react';
+import { Activity, BookOpen, Compass, KeyRound, Keyboard, LogOut, Moon, Search, Server, Shield, ShieldCheck, Sun, TerminalSquare, Trash2 } from 'lucide-react';
 import { bao, normalizeNamespace } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useSetupStage } from '@/lib/queries';
@@ -13,6 +13,7 @@ import { ShortcutsDialog } from './ShortcutsDialog';
 const links = [
   { to: '/welcome' as const, label: 'Getting started', icon: Compass },
   { to: '/secrets' as const, label: 'Secrets', icon: KeyRound },
+  { to: '/trash' as const, label: 'Trash', icon: Trash2 },
   { to: '/search' as const, label: 'Search', icon: Search },
   { to: '/runbooks' as const, label: 'Runbooks', icon: BookOpen },
   { to: '/codes' as const, label: 'One-time codes', icon: ShieldCheck },
