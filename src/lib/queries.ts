@@ -1,12 +1,102 @@
 import { useQuery } from '@tanstack/react-query';
 import { bao } from './api';
 import {
+  envMetadataPath,
   metadataPath,
   secretApiPath,
   secretPath,
   totpCodePath,
   totpKeyPath,
 } from './baoPaths';
+import { environmentMarkerPath, ENVIRONMENT_MARKER, inferLayout, type ClassifiedSecret, type LayoutProfile } from './layout';
+import { registerProjectLayout } from './layoutResolver';
+
+const METADATA_SAMPLE = 80;
+
+function logicalParent(path: string): string {
+  const slash = path.lastIndexOf('/');
+  return slash === -1 ? '' : path.slice(0, slash);
+}
+
+/**
+ * A sibling path used to probe create capability. When discovery found a path
+ * in this folder, derive the physical parent from it; otherwise fall back to
+ * the legacy `<project>/env/<env>/...` probe.
+ */
+export function capabilityProbePath(project: string, env: string, allPaths: string[], folder = ''): string {
+  const representative = allPaths.find((path) => logicalParent(path) === folder)
+    ?? allPaths.find((path) => (folder ? path.startsWith(`${folder}/`) : true))
+    ?? '';
+  const fallback = [project, 'env', env, folder, '__new__'].filter(Boolean).join('/');
+  if (!representative) return fallback;
+  const physical = secretApiPath(project, env, representative);
+  const parts = physical.split('/').filter(Boolean);
+  // In project/repo/env layouts the last segment of a leaf path is the env.
+  if (parts[parts.length - 1] === env) return `${physical}/__new__`;
+  parts[parts.length - 1] = '__new__';
+  return parts.join('/');
+}
+
+export interface LayoutDiscovery {
+  profile: LayoutProfile;
+  /** Secret paths only; environment markers are excluded. */
+  classified: ClassifiedSecret[];
+  /** Includes empty environments represented only by a marker. */
+  environments: string[];
+  warnings: string[];
+  unclassified: Array<{ physical: string; reason: string }>;
+  rawPaths: string[];
+  markers: string[];
+}
+
+/**
+ * Recursively lists the project's KV tree, samples custom metadata, and infers
+ * the logical layout. When inference cannot classify a path it is still
+ * returned in rawPaths and the reason is logged at warning level by inferLayout.
+ */
+export function useLayoutDiscovery(project?: string) {
+  return useQuery<LayoutDiscovery>({
+    queryKey: ['layout-discovery', project],
+    enabled: Boolean(project),
+    staleTime: 120_000,
+    retry: false,
+    queryFn: async () => {
+      const allPaths = await bao.listRecursive(`${project!}/`);
+      const isMarker = (path: string) => path.slice(path.lastIndexOf('/') + 1) === ENVIRONMENT_MARKER;
+      const markers = allPaths.filter(isMarker);
+      const rawPaths = allPaths.filter((path) => !isMarker(path));
+      const metadataByPath: Record<string, Record<string, string>> = {};
+      // Markers carry the environment metadata, so sample them before secrets.
+      for (const path of [...markers, ...rawPaths].slice(0, METADATA_SAMPLE)) {
+        try {
+          const meta = await bao.readMetadata(path);
+          if (meta.data.custom_metadata) metadataByPath[path] = meta.data.custom_metadata;
+        } catch {
+          // Metadata may be unreadable for this token; heuristics still apply.
+        }
+      }
+      const result = inferLayout(allPaths, metadataByPath);
+      const classified = result.classified.filter((secret) => !isMarker(secret.physical));
+      const environments = [...new Set(result.classified.map((secret) => secret.env))];
+      registerProjectLayout(project!, result.profile, classified);
+      return { ...result, classified, environments, rawPaths, markers };
+    },
+  });
+}
+
+/** Environment names derived from discovery, with the legacy listing as fallback. */
+export function useEnvironments(project?: string) {
+  const discovery = useLayoutDiscovery(project);
+  return useQuery<string[]>({
+    queryKey: ['environments', project, discovery.data?.profile.kind ?? 'pending'],
+    queryFn: async () => {
+      if (discovery.data?.environments.length) return discovery.data.environments;
+      return project ? bao.listEnvironments(project) : [];
+    },
+    enabled: Boolean(project) && (discovery.isSuccess || discovery.isError),
+    staleTime: 60_000,
+  });
+}
 
 export function useProjects() {
   return useQuery({
@@ -29,15 +119,6 @@ export function useKvMount() {
   return useQuery({ queryKey: ['setup-kv-mount'], queryFn: () => bao.hasKvMount(), retry: false, staleTime: 60_000 });
 }
 
-export function useEnvironments(project?: string) {
-  return useQuery({
-    queryKey: ['environments', project],
-    queryFn: () => (project ? bao.listEnvironments(project) : []),
-    enabled: Boolean(project),
-    staleTime: 60_000,
-  });
-}
-
 export function useServices(project?: string, env?: string) {
   return useQuery({
     queryKey: ['services', project, env],
@@ -57,12 +138,35 @@ export function useCredentials(project?: string) {
 }
 
 export function useSecretPaths(project?: string, env?: string) {
-  return useQuery({
-    queryKey: ['secret-paths', project, env],
-    queryFn: () => bao.listSecretPaths(project!, env!),
-    enabled: Boolean(project && env),
+  const discovery = useLayoutDiscovery(project);
+  return useQuery<string[]>({
+    queryKey: ['secret-paths', project, env, discovery.data?.profile.kind ?? 'pending'],
+    queryFn: async () => {
+      if (discovery.data?.classified.length) {
+        return [...new Set(
+          discovery.data.classified
+            .filter((secret) => secret.env === env && secret.logical)
+            .map((secret) => secret.logical),
+        )];
+      }
+      return project && env ? bao.listSecretPaths(project, env) : [];
+    },
+    enabled: Boolean(project && env) && (discovery.isSuccess || discovery.isError),
     staleTime: 30_000,
   });
+}
+
+/** Physical path + capabilities for the privilege-gated "new environment" action. */
+export function environmentCreationTarget(project: string | undefined, env: string, discovery: LayoutDiscovery | undefined) {
+  if (!project || !env.trim()) return null;
+  const profile = discovery?.profile;
+  if (!profile) return null;
+  const physical = environmentMarkerPath(profile, project, env.trim());
+  return {
+    physical,
+    dataPath: `kv/data/${physical}`,
+    metadataPath: `kv/metadata/${physical}`,
+  };
 }
 
 export function useSecret(project?: string, env?: string, service?: string, version?: number) {
@@ -99,9 +203,9 @@ export function capabilityPathsForSecret(project?: string, env?: string, service
     metadataPath(project),
     secretPath(project, env, service),
     // Probe path for "New secret": ACL wildcards answer the same as a real new path.
-    `kv/data/${project}/env/${env}/__new__`,
+    `kv/data/${capabilityProbePath(project, env, [], '')}`,
     ...allEnvs.filter((e) => e !== env).map((e) => secretPath(project, e, service)),
-    ...allEnvs.map((e) => `kv/metadata/${project}/env/${e}/`),
+    ...allEnvs.map((e) => envMetadataPath(project, e)),
   ];
 }
 
@@ -123,22 +227,29 @@ export function useRunbook(project?: string) {
 }
 
 /** Capabilities needed for folder browsing, secret reads, creates and metadata writes. */
-export function capabilityPathsForFolder(project?: string, env?: string, folder = '', allPaths: string[] = []) {
+export function capabilityPathsForFolder(
+  project?: string,
+  env?: string,
+  folder = '',
+  allPaths: string[] = [],
+  allEnvs: string[] = [],
+) {
   if (!project || !env) return [];
-  const metaBase = `kv/metadata/${project}/env/${env}`;
-  const dataBase = `kv/data/${project}/env/${env}`;
-  const folders = new Set<string>(folder ? [folder] : ['']);
+  const probe = capabilityProbePath(project, env, allPaths, folder);
+  const physicalDirs = new Set<string>();
   for (const path of allPaths) {
-    const slash = path.lastIndexOf('/');
-    if (slash !== -1) folders.add(path.slice(0, slash));
+    const physical = secretApiPath(project, env, path);
+    const slash = physical.lastIndexOf('/');
+    if (slash > 0) physicalDirs.add(`${physical.slice(0, slash)}/`);
   }
   return [
-    `${metaBase}/`,
-    ...[...folders].map((name) => `${metaBase}/${name}/`),
-    `${dataBase}/${folder}/__new__`,
-    `${metaBase}/${folder}/__new__`,
-    ...allPaths.map((path) => `${dataBase}/${path}`),
-    ...allPaths.map((path) => `${metaBase}/${path}`),
+    envMetadataPath(project, env),
+    ...[...physicalDirs].map((dir) => `kv/metadata/${dir}`),
+    `kv/data/${probe}`,
+    `kv/metadata/${probe}`,
+    ...allPaths.map((path) => secretPath(project, env, path)),
+    ...allPaths.map((path) => `kv/metadata/${secretApiPath(project, env, path)}`),
+    ...allEnvs.filter((name) => name !== env).map((name) => envMetadataPath(project, name)),
   ];
 }
 

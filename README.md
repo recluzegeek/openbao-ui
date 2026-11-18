@@ -112,6 +112,19 @@ audit log through `podman exec` (or `docker exec`) and returns only actor/operat
 a production build; do not expose it outside localhost. A production build has no proxy: point the
 console at an OpenBao address that allows the console origin in its CORS config.
 
+### Server-driven KV layout
+
+Selecting a project recursively lists `kv/metadata/<project>/`, samples `custom_metadata`, and
+infers the layout in this order: custom metadata labels, path heuristics, then the raw recursive
+listing. A **Server layout** panel on the Secrets page shows which pattern was inferred; when a
+heuristic fails, the reason is shown in the panel and logged with `console.warn` (never with secret
+values). The legacy `env/<environment>` tree is retained as a fallback.
+
+Users with `create` capability on the project KV root can add an environment and attach arbitrary
+`custom_metadata` from the same panel. OpenBao has no folders, so an environment is represented by a
+reserved marker secret that is hidden from the secret list but still included in discovery, so empty
+environments remain visible. The write uses CAS 0 and cannot overwrite an existing environment.
+
 Sign in with either:
 
 - **Root token** from `../openbao-poc/.secrets/init.json` (full access), or

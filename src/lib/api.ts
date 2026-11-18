@@ -248,6 +248,43 @@ export const bao = {
 
   list: (path: string) => request<ListResponse>(path, { list: true }),
 
+  /**
+   * Generic recursive KV listing — the same walk `bao kv list -recursive` does.
+   * Returns full leaf paths relative to the metadata root, e.g.
+   * "tgc/identity-service/development", even when a prefix is supplied.
+   * Caps breadth and depth so a large mount cannot freeze the console.
+   */
+  listRecursive: async (prefix = '', maxPaths = 4000): Promise<string[]> => {
+    const base = prefix.replace(/^\/+|\/+$/g, '');
+    const seen = new Set<string>();
+    const out: string[] = [];
+    const walk = async (relative: string, depth: number): Promise<void> => {
+      if (depth > 12 || out.length >= maxPaths) return;
+      const cleanRel = relative.replace(/^\/+|\/+$/g, '');
+      const full = cleanRel ? `${base}/${cleanRel}` : base;
+      if (seen.has(full)) return;
+      seen.add(full);
+      const listPath = full ? `kv/metadata/${full}/` : 'kv/metadata/';
+      const res = await bao.list(listPath);
+      for (const key of cleanKeys(res.data?.keys)) {
+        if (out.length >= maxPaths) return;
+        const child = cleanRel ? `${cleanRel}/${key}` : key;
+        if (key.endsWith('/')) await walk(child, depth + 1);
+        else out.push(`${full}/${key.replace(/^\/+|\/+$/g, '')}`.replace(/\/{2,}/g, '/'));
+      }
+    };
+    await walk('', 0);
+    return out;
+  },
+
+  /** KV v2 mounts advertised by the server, so `kv/` is no longer assumed. */
+  listKvMounts: async (): Promise<string[]> => {
+    const res = await request<{ data?: Record<string, { type?: string; options?: { version?: string } }> }>('sys/mounts');
+    return Object.entries(res.data ?? {})
+      .filter(([, config]) => config?.type === 'kv' && config?.options?.version === '2')
+      .map(([path]) => path.replace(/\/$/, ''));
+  },
+
   listProjects: async () => {
     const res = await bao.list('kv/metadata/');
     return cleanKeys(res.data?.keys).map((k) => k.replace(/\/$/, ''));
@@ -295,6 +332,22 @@ export const bao = {
       method: 'POST',
       data: { data, options: cas === undefined ? {} : { cas } },
     }),
+
+  /**
+   * Create an environment by writing a reserved marker secret at its physical
+   * path, then attaching custom metadata to that path. CAS 0 makes creation
+   * fail instead of overwriting an existing marker. No secret values are stored.
+   */
+  createEnvironment: async (path: string, customMetadata: Record<string, string>) => {
+    await bao.writeSecret(path, { __console_environment_marker__: '1' }, 0);
+    try {
+      await bao.writeCustomMetadata(path, customMetadata);
+    } catch (error) {
+      // Leave no half-created environment if the token cannot write metadata.
+      await request<void>(`kv/data/${path}`, { method: 'DELETE' }).catch(() => undefined);
+      throw error;
+    }
+  },
 
   listTotpAccounts: async () => {
     const res = await bao.list('totp/keys/');

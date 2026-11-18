@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 import { bao, type CapabilitiesMap } from '@/lib/api';
 import { can, deniedReason } from '@/lib/capabilities';
-import { envRank, secretApiPath, secretPath } from '@/lib/baoPaths';
+import { envMetadataPath, envRank, secretApiPath, secretPath } from '@/lib/baoPaths';
 import { envFile, formatWhen, mask } from '@/lib/format';
 import { pushRecent } from '@/lib/navigationMemory';
 import { dataFromRows, rowsFromData, validateRows, type FieldRow } from '@/lib/secretForm';
@@ -45,9 +45,11 @@ import { buildSecretTree, folderBreadcrumbs, folderInTree, secretName, validSecr
 import { useAuth } from '@/lib/auth';
 import {
   capabilityPathsForFolder,
+  capabilityProbePath,
   useCapabilities,
   useCredentials,
   useEnvironments,
+  useLayoutDiscovery,
   useProjects,
   useSecret,
   useSecretMetadata,
@@ -59,6 +61,7 @@ import { Badge } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
 import { CopyButton, Dialog, EmptyState, EnvBadge, ErrorState } from '@/components/common/Extras';
 import { OnboardingBanner } from '@/features/onboarding/OnboardingBanner';
+import { LayoutDiscoveryPanel } from './LayoutDiscoveryPanel';
 import { RecentActivityPanel } from './RecentActivityPanel';
 import { CompareEnvsPanel } from './CompareEnvsPanel';
 import { FieldTable } from './FieldTable';
@@ -207,6 +210,7 @@ export function SecretsPage() {
 
   const projects = useProjects();
   const [project, setProject] = useState<string | undefined>(search.project);
+  const discovery = useLayoutDiscovery(project);
   const environments = useEnvironments(project);
   const envs = useMemo(() => [...(environments.data ?? [])].sort(envRank), [environments.data]);
   const [env, setEnv] = useState<string | undefined>(search.env);
@@ -279,7 +283,7 @@ export function SecretsPage() {
     if (project && env && service) pushRecent({ project, env, path: service });
   }, [project, env, service]);
 
-  const capsQ = useCapabilities(capabilityPathsForFolder(project, env, folder, allPaths));
+  const capsQ = useCapabilities(capabilityPathsForFolder(project, env, folder, allPaths, envs));
   const caps = capsQ.data;
   const secretQ = useSecret(project, env, service, version);
   const metadataQ = useSecretMetadata(project, env, service);
@@ -301,12 +305,13 @@ export function SecretsPage() {
 
   const currentPath = project && env && service ? secretPath(project, env, service) : '';
   const apiPath = project && env && service ? secretApiPath(project, env, service) : '';
-  const newPath = project && env ? `kv/data/${project}/env/${env}/${folder}/__new__` : '';
+  const probe = project && env ? capabilityProbePath(project, env, allPaths, folder) : '';
+  const newPath = probe ? `kv/data/${probe}` : '';
   const metaWritePath = currentPath ? currentPath.replace(/^kv\/data\//, 'kv/metadata/') : '';
   const writable = can(caps, currentPath, 'update') || can(caps, currentPath, 'create');
   const canCreate = can(caps, newPath, 'create') || can(caps, newPath, 'update');
   const canWriteMeta = can(caps, metaWritePath, 'update') ||
-    can(caps, `kv/metadata/${project}/env/${env}/${folder}/__new__`, 'create');
+    Boolean(probe && can(caps, `kv/metadata/${probe}`, 'create'));
   const folderNode = folderInTree(tree, folder) ?? tree;
   const filteredSecrets = folderNode.secrets.filter((path) => secretName(path).toLowerCase().includes(filter.toLowerCase()));
   const crumbs = folderBreadcrumbs(folder);
@@ -471,10 +476,11 @@ export function SecretsPage() {
     setEditorError(null);
     try {
       // bao.writeSecret() adds the kv/data/ prefix, so pass the bare API path.
-      await bao.writeSecret(`${project}/env/${env}/${name}`, dataFromRows(editor.rows), editor.cas);
+      const bare = secretApiPath(project, env, name);
+      await bao.writeSecret(bare, dataFromRows(editor.rows), editor.cas);
       const custom = mergeAnnotations(editor.baseMetadata, editor.annotations);
       if (canWriteMeta) {
-        await bao.writeCustomMetadata(`${project}/env/${env}/${name}`, custom);
+        await bao.writeCustomMetadata(bare, custom);
       } else if (Object.values(custom).some((value) => value && value !== '[]' && value !== '{}' && value !== '')) {
         addToast('info', 'Values saved, annotations skipped', 'Your token cannot write KV metadata; tags, comments and overrides were not stored.');
       }
@@ -482,7 +488,7 @@ export function SecretsPage() {
       addToast(
         'success',
         editor.mode === 'create' ? 'Secret created' : 'Secret saved',
-        `kv/data/${project}/env/${env}/${name} · version ${editor.cas + 1}`,
+        `kv/data/${bare} · version ${editor.cas + 1}`,
       );
       setService(name);
       setFolder(name.includes('/') ? name.slice(0, name.lastIndexOf('/')) : '');
@@ -564,7 +570,7 @@ export function SecretsPage() {
           <label>Environment</label>
           <div className="env-switch" role="group" aria-label="Environment">
             {envs.map((name) => {
-              const allowed = can(caps, `kv/metadata/${project}/env/${name}/`, 'list');
+              const allowed = can(caps, project ? envMetadataPath(project, name) : '', 'list');
               return (
                 <button
                   key={name}
@@ -583,6 +589,12 @@ export function SecretsPage() {
           <input aria-label="Filter services" placeholder="Filter secrets…" value={filter} onChange={(event) => setFilter(event.target.value)} />
         </div>
       </div>
+
+      <LayoutDiscoveryPanel
+        project={project}
+        discovery={discovery.data}
+        error={discovery.error}
+      />
 
       <div className="tabs" role="tablist" aria-label="Secret views" style={{ marginBottom: '-0.4rem' }}>
         <button className={`btn btn--${tab === 'env' ? 'primary' : 'outlined'} btn--small`} role="tab" aria-selected={tab === 'env'} onClick={() => setTab('env')}>Environment secrets</button>
@@ -761,7 +773,7 @@ export function SecretsPage() {
           }
         >
           <p className="small muted">
-            This copies the {env} version into <span className="mono">{project}/env/{promoteTo}/{service}</span>.
+            This copies the {env} version into <span className="mono">{secretPath(project, promoteTo, service)}</span>.
             Review the destination first — existing values will be replaced.
           </p>
           <TargetPreview project={project} env={promoteTo} service={service} />
@@ -800,11 +812,11 @@ export function SecretsPage() {
                 value={editor.name}
                 onChange={(event) => setEditor({ ...editor, name: event.target.value })}
               />
-              <p className="small muted">Stored at <span className="mono">kv/data/{project}/env/{env}/&lt;path&gt;</span></p>
+              <p className="small muted">Stored at <span className="mono">kv/data/{project && env ? secretApiPath(project, env, editor.name) : '<path>'}</span></p>
             </div>
           ) : (
             <p className="small muted">
-              Editing <span className="mono">kv/data/{project}/env/{env}/{editor.name}</span>.
+              Editing <span className="mono">{apiPath}</span>.
             </p>
           )}
 

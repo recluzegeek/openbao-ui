@@ -1,10 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { can, deniedReason } from './capabilities';
 import { envRank, parseTotpAccount, secretPath, totpCodePath } from './baoPaths';
 import { envFile, formatTtl, parsePeriod, secondsUntil, shellQuote, tokenTtlLabel } from './format';
 import { baoCliSnippet, curlSnippet } from './snippets';
 import { dataFromRows, rowsFromData, validSecretName, validateRows } from './secretForm';
-import { capabilityPathsForSecret } from './queries';
+import { bao } from './api';
+import { capabilityPathsForFolder, capabilityPathsForSecret, environmentCreationTarget } from './queries';
+import { environmentMarkerPath, inferLayout, physicalPath } from './layout';
+import { clearProjectLayouts, registerProjectLayout, resolveApiPath, resolveEnvMetadataPath, toLogicalPath } from './layoutResolver';
 import { actorLabel, auditCsv, auditPathHref, filterAuditEntries, operationLabel, type AuditEntry, type AuditFilters } from './audit';
 import { buildSecretTree, folderBreadcrumbs, folderInTree, validSecretPath } from './secretTree';
 import { buildReferenceLookup, findReferences, parseKeyValueText, resolveReferences, serializeKeyValue } from './secretFormats';
@@ -20,6 +23,9 @@ import {
 } from './policy';
 import { identitySnippets } from './machineIdentity';
 import { deriveSetupStage, setupSnippets, SHORTCUTS } from './setup';
+
+beforeEach(() => clearProjectLayouts());
+afterEach(() => vi.restoreAllMocks());
 
 describe('OpenBao paths', () => {
   it('builds the POC KV layout', () => {
@@ -402,5 +408,117 @@ describe('getting-started setup', () => {
     expect(all).toContain('bao operator init');
     expect(all).not.toMatch(/unseal_keys|root_token|secret_id|password=/i);
     expect(SHORTCUTS.some((s) => s.keys.includes('⌘K'))).toBe(true);
+  });
+});
+
+describe('server-driven layout discovery', () => {
+  it('returns full metadata paths from a recursive listing', async () => {
+    const list = vi.spyOn(bao, 'list').mockImplementation(async (path) => {
+      const keys: Record<string, string[]> = {
+        'kv/metadata/tgc/': ['identity-service/'],
+        'kv/metadata/tgc/identity-service/': ['development'],
+      };
+      return { data: { keys: keys[path] ?? [] } };
+    });
+    expect(await bao.listRecursive('tgc/')).toEqual(['tgc/identity-service/development']);
+    expect(list).toHaveBeenCalledWith('kv/metadata/tgc/');
+  });
+
+  it('infers the legacy seeded layout without warnings', () => {
+    const result = inferLayout([
+      'ui-demo/env/development/web',
+      'ui-demo/env/staging/database/postgres',
+    ]);
+    expect(result.profile.kind).toBe('legacy-env');
+    expect(result.classified).toEqual([
+      { physical: 'ui-demo/env/development/web', project: 'ui-demo', env: 'development', logical: 'web', component: '', source: 'heuristic' },
+      { physical: 'ui-demo/env/staging/database/postgres', project: 'ui-demo', env: 'staging', logical: 'database/postgres', component: '', source: 'heuristic' },
+    ]);
+    expect(physicalPath(result.profile, 'ui-demo', 'development', 'web')).toBe('ui-demo/env/development/web');
+    expect(environmentMarkerPath(result.profile, 'ui-demo', 'staging')).toBe('ui-demo/env/staging/__environment__');
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('uses custom metadata first, including JSON array labels', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const result = inferLayout(
+      ['tgc/identity-service/development', 'tgc/backend-api/production/database/postgres'],
+      {
+        'tgc/identity-service/development': {
+          ph_project: 'tgc', ph_scope_tabs: '["development"]', ph_component_tabs: '["identity-service"]',
+        },
+        'tgc/backend-api/production/database/postgres': {
+          ph_project: 'tgc', ph_scope_tabs: '["production"]', ph_component_tabs: '["backend-api"]',
+        },
+      },
+    );
+    expect(result.profile.kind).toBe('project-repo-env');
+    expect(result.classified[0]).toMatchObject({
+      project: 'tgc', env: 'development', logical: 'identity-service', component: 'identity-service', source: 'metadata',
+    });
+    expect(result.classified[1]).toMatchObject({
+      env: 'production', logical: 'backend-api/database/postgres', source: 'metadata',
+    });
+    expect(physicalPath(result.profile, 'tgc', 'development', 'identity-service')).toBe('tgc/identity-service/development');
+    expect(physicalPath(result.profile, 'tgc', 'production', 'backend-api/database/postgres'))
+      .toBe('tgc/backend-api/production/database/postgres');
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('warns at warning level and keeps raw paths when heuristics disagree', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const result = inferLayout(
+      ['tgc/web/custom-stage', 'random/tree/leaf'],
+      { 'tgc/web/custom-stage': { ph_project: 'tgc', ph_scope_tabs: '["staging"]' } },
+    );
+    expect(result.warnings.some((message) => message.includes('Metadata environment "staging" disagrees'))).toBe(true);
+    expect(result.warnings.some((message) => message.includes('No environment-like segment found in "random/tree/leaf"'))).toBe(true);
+    expect(result.unclassified.map((item) => item.physical)).toContain('random/tree/leaf');
+    expect(warn).toHaveBeenCalled();
+    expect(warn.mock.calls.flat().join('\n')).toContain('[layout-discovery]');
+  });
+
+  it('falls back to a complete raw listing when no pattern matches', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const result = inferLayout(['alpha/beta/gamma']);
+    expect(result.profile.kind).toBe('raw');
+    expect(result.classified[0]).toMatchObject({
+      physical: 'alpha/beta/gamma', env: '(unassigned)', logical: 'beta/gamma', source: 'raw',
+    });
+    expect(result.warnings.some((message) => message.includes('No layout pattern matched'))).toBe(true);
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it('classifies an environment marker so an empty environment is discoverable', () => {
+    const sample = inferLayout(['tgc/identity-service/development']);
+    const marker = environmentMarkerPath(sample.profile, 'tgc', 'staging');
+    const result = inferLayout([marker], { [marker]: { ui_env: 'staging', ui_owner: 'platform' } });
+    expect(marker).toBe('tgc/__environment__/staging/__environment__');
+    expect(result.classified[0]).toMatchObject({ physical: marker, env: 'staging', source: 'metadata' });
+  });
+
+  it('resolves logical paths back to discovered physical paths', () => {
+    const layout = inferLayout(['tgc/identity-service/development']);
+    registerProjectLayout('tgc', layout.profile, layout.classified);
+    expect(resolveApiPath('tgc', 'development', 'identity-service')).toBe('tgc/identity-service/development');
+    expect(toLogicalPath('tgc', 'kv/metadata/tgc/identity-service/development')).toBe('identity-service');
+    expect(resolveEnvMetadataPath('tgc', 'development')).toBe('tgc');
+    expect(environmentMarkerPath(layout.profile, 'tgc', 'staging')).toBe('tgc/__environment__/staging/__environment__');
+    const target = environmentCreationTarget('tgc', 'staging', { ...layout, rawPaths: [], environments: [], markers: [] });
+    expect(target?.dataPath).toBe('kv/data/tgc/__environment__/staging/__environment__');
+    expect(target?.metadataPath).toBe('kv/metadata/tgc/__environment__/staging/__environment__');
+  });
+
+  it('probes capabilities on discovered paths for folders and new environments', () => {
+    const layout = inferLayout(['tgc/identity-service/development/database/postgres']);
+    registerProjectLayout('tgc', layout.profile, layout.classified);
+    const paths = capabilityPathsForFolder(
+      'tgc', 'development', 'identity-service/database',
+      ['identity-service/database/postgres'], ['development', 'production'],
+    );
+    expect(paths).toContain('kv/data/tgc/identity-service/development/database/postgres');
+    expect(paths).toContain('kv/metadata/tgc/identity-service/development/database/');
+    expect(paths).toContain('kv/data/tgc/identity-service/development/database/__new__');
+    expect(paths).toContain('kv/metadata/tgc/');
   });
 });
