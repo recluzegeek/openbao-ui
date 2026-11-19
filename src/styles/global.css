@@ -275,19 +275,6 @@ textarea:focus {
 .env-switcher > select { width: auto; flex: 1; min-width: 170px; }
 .env-switcher > .env-tabs { flex: 1; }
 
-/* The only search left on the Secrets page: a key filter scoped to the open folder. */
-.folder-filter {
-  display: flex; align-items: center; gap: 0.4rem;
-  padding: 0.45rem var(--spacing-md); border-bottom: 1px solid var(--color-border);
-}
-.folder-filter svg { color: var(--color-text-muted); flex: none; }
-.folder-filter input {
-  flex: 1; min-width: 0; min-height: 32px; padding: 0.35rem 0.5rem;
-  border-radius: 8px;
-  color: var(--color-text-primary); font-size: 0.82rem;
-}
-.folder-filter .link-btn { font-size: 0.75rem; flex: none; }
-
 /* One primary action plus a compact overflow menu in the detail pane header. */
 .action-menu { position: relative; }
 .action-menu > summary { list-style: none; cursor: pointer; min-width: 34px; justify-content: center; }
@@ -684,8 +671,16 @@ textarea:focus {
 }
 .palette__input { display: flex; align-items: center; gap: 0.6rem; padding: 0.85rem 1rem; border-bottom: 1px solid var(--color-border); }
 .palette__input > svg { flex: none; color: var(--color-text-muted); }
-.palette__input input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--color-text-primary); font-size: 0.95rem; }
-.palette__input kbd { flex: none; }
+/* The palette input stays borderless in every state; the esc chip sits beside
+   it instead of overlapping it. */
+.palette__input input,
+.palette__input input:hover,
+.palette__input input:focus,
+.palette__input input:focus-visible {
+  flex: 1 1 auto; min-width: 0; border: 0; border-width: 0; outline: none; outline-style: none;
+  box-shadow: none; background: transparent; color: var(--color-text-primary); font-size: 0.95rem;
+}
+.palette__input kbd { flex: 0 0 auto; margin-left: auto; }
 .palette__list { list-style: none; margin: 0; padding: 0.4rem; overflow-y: auto; }
 .palette__item {
   display: flex; align-items: center; gap: 0.6rem; width: 100%; padding: 0.6rem 0.7rem;

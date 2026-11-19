@@ -147,7 +147,7 @@ export function CommandPalette() {
               if (event.key === 'Enter' && filtered[selected]) { event.preventDefault(); run(filtered[selected]); }
             }}
           />
-          <kbd>⌘K</kbd>
+          <kbd className="palette__esc" aria-hidden="true">esc</kbd>
         </div>
         <ul className="palette__list" role="listbox" aria-label="Commands">
           {filtered.map((action, index) => (

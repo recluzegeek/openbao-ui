@@ -44,7 +44,6 @@ import {
   type SecretAnnotations,
 } from '@/lib/secretMetadata';
 import { buildSecretTree, folderBreadcrumbs, folderInTree, secretName, validSecretPath, type SecretTreeFolder } from '@/lib/secretTree';
-import { matchesSearch } from '@/lib/searchMatch';
 import { groupFieldsByPrefix } from '@/lib/secretGroups';
 import { useAuth } from '@/lib/auth';
 import {
@@ -377,7 +376,6 @@ export function SecretsPage() {
   const allPaths = useMemo(() => pathsQ.data ?? [], [pathsQ.data]);
   const [folder, setFolder] = useState<string>(search.folder ?? '');
   const [service, setService] = useState<string | undefined>(search.service);
-  const [filter, setFilter] = useState('');
   const [tab, setTab] = useState<'env' | 'creds'>('env');
   const [version, setVersion] = useState<number | undefined>(undefined);
   const [promoteTo, setPromoteTo] = useState<string | null>(null);
@@ -533,9 +531,6 @@ export function SecretsPage() {
   const canWriteMeta = can(caps, metaWritePath, 'update') ||
     Boolean(probe && can(caps, `kv/metadata/${probe}`, 'create'));
   const folderNode = folderInTree(tree, folder) ?? tree;
-  const filterText = filter.trim();
-  const filteredSecrets = folderNode.secrets.filter((path) =>
-    matchesSearch([secretName(path), path, ...(fieldNamesByPath[path] ?? [])], filterText));
   const crumbs = folderBreadcrumbs(folder);
   const fieldGroups = useMemo(
     () => groupFieldsByPrefix(secretQ.data?.data.data ?? {}),
@@ -1055,6 +1050,16 @@ export function SecretsPage() {
               <FolderOpen size={17} />
               <h3>Folders</h3>
               <Badge size="small">{tree.folders.length}</Badge>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => window.dispatchEvent(new Event('console:open-palette'))}
+                aria-label="Search secrets"
+                title="Search secrets"
+                data-testid="folder-search"
+              >
+                <Search size={15} />
+              </button>
               <Button
                 size="small"
                 variant="outlined"
@@ -1080,19 +1085,6 @@ export function SecretsPage() {
                 </span>
               ))}
             </nav>
-            <div className="folder-filter">
-              <Search size={14} aria-hidden="true" />
-              <input
-                aria-label="Filter keys in this folder"
-                placeholder="Filter keys…"
-                value={filter}
-                onChange={(event) => setFilter(event.target.value)}
-                data-testid="folder-filter"
-              />
-              {filter && (
-                <button type="button" className="link-btn" onClick={() => setFilter('')}>Clear</button>
-              )}
-            </div>
             <div style={{ padding: 0 }}>
               {pathsQ.isLoading && <div className="state"><div className="spinner" /></div>}
               {pathsQ.isError && <ErrorState error={pathsQ.error} onRetry={() => void pathsQ.refetch()} />}
@@ -1102,14 +1094,14 @@ export function SecretsPage() {
               )}
               <div className="divider" style={{ margin: '0.5rem var(--spacing-md)' }} />
               <div className="section-title" style={{ padding: '0 var(--spacing-md)' }}>
-                Secrets in {folder || 'root'} ({filteredSecrets.length})
+                Secrets in {folder || 'root'} ({folderNode.secrets.length})
               </div>
-              {!pathsQ.isLoading && filteredSecrets.length === 0 && (
+              {!pathsQ.isLoading && folderNode.secrets.length === 0 && (
                 <p className="small muted" style={{ padding: '0 var(--spacing-md)' }}>
                   No secrets in this folder. Use <strong>New folder</strong> to create a path, or <strong>Import</strong> to add fields.
                 </p>
               )}
-              {filteredSecrets.map((path) => {
+              {folderNode.secrets.map((path) => {
                 const fields = fieldNamesByPath[path]?.length ?? 0;
                 return (
                   <button
