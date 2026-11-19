@@ -20,7 +20,6 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
-  Search,
   Tag,
   Trash2,
   Undo2,
@@ -1049,17 +1048,7 @@ export function SecretsPage() {
             <div className="panel__head">
               <FolderOpen size={17} />
               <h3>Folders</h3>
-              <Badge size="small">{tree.folders.length}</Badge>
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={() => window.dispatchEvent(new Event('console:open-palette'))}
-                aria-label="Search secrets"
-                title="Search secrets"
-                data-testid="folder-search"
-              >
-                <Search size={15} />
-              </button>
+              <Badge size="small">{folderNode.secrets.length}</Badge>
               <Button
                 size="small"
                 variant="outlined"
@@ -1089,7 +1078,7 @@ export function SecretsPage() {
               {pathsQ.isLoading && <div className="state"><div className="spinner" /></div>}
               {pathsQ.isError && <ErrorState error={pathsQ.error} onRetry={() => void pathsQ.refetch()} />}
               <FolderRows folder={tree} current={folder} depth={0} onSelect={(path) => guardInline(() => { setFolder(path); setService(undefined); setVersion(undefined); })} />
-              {!pathsQ.isLoading && tree.folders.length === 0 && (
+              {!pathsQ.isLoading && tree.folders.length === 0 && folderNode.secrets.length === 0 && (
                 <p className="small muted" style={{ padding: '0 var(--spacing-md)' }}>No folders in this project yet.</p>
               )}
               <div className="divider" style={{ margin: '0.5rem var(--spacing-md)' }} />
