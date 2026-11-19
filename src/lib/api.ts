@@ -100,6 +100,8 @@ interface RequestOptions {
   contentType?: string;
   /** Extra headers, e.g. `X-Vault-Wrap-TTL` for response wrapping. Merged last. */
   headers?: Record<string, string>;
+  /** Cancellation for long walks such as the background search index build. */
+  signal?: AbortSignal;
 }
 
 export async function request<T>(apiPath: string, options: RequestOptions = {}): Promise<T> {
@@ -125,6 +127,7 @@ export async function request<T>(apiPath: string, options: RequestOptions = {}):
       method: options.method ?? 'GET',
       headers,
       body: options.data === undefined ? undefined : JSON.stringify(options.data),
+      signal: options.signal,
     });
   } catch (cause) {
     throw new BaoError(
@@ -240,7 +243,12 @@ export interface AclPolicyResponse {
 
 /** Effective policies, including those inherited from identity groups. */
 export interface ResultantAclResponse {
-  data: { policies?: string[] };
+  data: {
+    policies?: string[];
+    /** OpenBao's resultant-acl may also expose concrete and glob path grants. */
+    exact_paths?: Record<string, string[]>;
+    glob_paths?: Record<string, string[]>;
+  };
 }
 
 export interface AuthMethodSummary {
@@ -333,7 +341,7 @@ export const bao = {
   unseal: (key: string) => request<SealStatusResponse>('sys/unseal', { method: 'PUT', data: { key }, unauthenticated: true }),
 
   lookupSelf: () => request<LookupSelfResponse>('auth/token/lookup-self'),
-  resultantAcl: () => request<ResultantAclResponse>('sys/internal/ui/resultant-acl'),
+  resultantAcl: (signal?: AbortSignal) => request<ResultantAclResponse>('sys/internal/ui/resultant-acl', { signal }),
   capabilities: (paths: string[]) =>
     request<{ data: CapabilitiesMap }>('sys/capabilities-self', { method: 'POST', data: { paths } }),
   loginUserpass: (username: string, password: string, mount = 'userpass') =>
@@ -368,7 +376,7 @@ export const bao = {
       data: {},
     }),
 
-  list: (path: string) => request<ListResponse>(path, { list: true }),
+  list: (path: string, signal?: AbortSignal) => request<ListResponse>(path, { list: true, signal }),
 
   /** Best-effort namespace picker. A 403 means the token cannot enumerate them. */
   listNamespaces: async (): Promise<string[]> => {
@@ -464,7 +472,7 @@ export const bao = {
   readRunbook: (project: string) => request<KVResponse>(runbookApiPath(project)),
   readSecret: (path: string, version?: number) =>
     request<KVResponse>(`kv/data/${path}`, version ? { params: { version: String(version) } } : {}),
-  readMetadata: (path: string) => request<KVMetadataResponse>(`kv/metadata/${path}`),
+  readMetadata: (path: string, signal?: AbortSignal) => request<KVMetadataResponse>(`kv/metadata/${path}`, { signal }),
   /** Custom metadata (tags, comments, overrides) lives on the KV v2 metadata endpoint. */
   writeCustomMetadata: (path: string, customMetadata: Record<string, string>) =>
     request<void>(`kv/metadata/${path}`, { method: 'POST', data: { custom_metadata: customMetadata } }),
@@ -518,6 +526,24 @@ export const bao = {
    * a key to the mount defaults. Read the current metadata and issue a full
    * POST, preserving custom_metadata and every setting the caller omits.
    */
+  /**
+   * Store the field-name list used by the client-side search index on KV v2
+   * metadata. Reads current metadata first so tags, comments, overrides and
+   * version settings are preserved. Only names are written — never values.
+   */
+  writeFieldNames: async (path: string, fields: string[]) => {
+    const current = await bao.readMetadata(path);
+    const existing = current.data;
+    return request<void>(`kv/metadata/${path}`, {
+      method: 'POST',
+      data: {
+        custom_metadata: { ...(existing.custom_metadata ?? {}), fields: JSON.stringify(fields) },
+        max_versions: existing.max_versions ?? 0,
+        cas_required: existing.cas_required ?? false,
+        delete_version_after: existing.delete_version_after ?? '0s',
+      },
+    });
+  },
   patchMetadataSettings: async (
     path: string,
     settings: { max_versions?: number; cas_required?: boolean; delete_version_after?: string },

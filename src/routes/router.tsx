@@ -1,4 +1,4 @@
-import { createRootRoute, createRoute, createRouter, Outlet } from '@tanstack/react-router';
+import { createRootRoute, createRoute, createRouter, Outlet, redirect } from '@tanstack/react-router';
 import { AppShell } from '@/components/layout/AppShell';
 import { EmptyState } from '@/components/common/Extras';
 import { LoginPage } from '@/features/auth/LoginPage';
@@ -8,7 +8,7 @@ import { UnwrapPage } from '@/features/secrets/UnwrapPage';
 import { CodesPage } from '@/features/totp/CodesPage';
 import { AutomationPage } from '@/features/automation/AutomationPage';
 import { RunbooksPage } from '@/features/runbooks/RunbooksPage';
-import { SearchPage } from '@/features/search/SearchPage';
+
 import { AccessPage } from '@/features/access/AccessPage';
 import { AuditPage } from '@/features/audit/AuditPage';
 import { WelcomePage } from '@/features/onboarding/WelcomePage';
@@ -46,11 +46,22 @@ const secretsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/secrets',
   component: SecretsPage,
-  validateSearch: (search: Record<string, unknown>) => ({
+  validateSearch: (search: Record<string, unknown>): {
+    project?: string;
+    env?: string;
+    service?: string;
+    folder?: string;
+    /** A palette field match opens the secret with this key selected. */
+    field?: string;
+    /** A palette command pre-fills the create editor with this name. */
+    create?: string;
+  } => ({
     project: typeof search.project === 'string' ? search.project : undefined,
     env: typeof search.env === 'string' ? search.env : undefined,
     service: typeof search.service === 'string' ? search.service : undefined,
     folder: typeof search.folder === 'string' ? search.folder : undefined,
+    field: typeof search.field === 'string' ? search.field : undefined,
+    create: typeof search.create === 'string' ? search.create : undefined,
   }),
 });
 
@@ -63,13 +74,12 @@ const trashRoute = createRoute({
   }),
 });
 
+// Kept as a redirect so old bookmarks land on the one search surface: the
+// command palette is reachable from the topbar and never needs a page route.
 const searchRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/search',
-  component: SearchPage,
-  validateSearch: (search: Record<string, unknown>) => ({
-    q: typeof search.q === 'string' ? search.q : undefined,
-  }),
+  beforeLoad: () => { throw redirect({ to: '/secrets', search: {} }); },
 });
 
 const codesRoute = createRoute({

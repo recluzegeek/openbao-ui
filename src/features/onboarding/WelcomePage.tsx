@@ -132,7 +132,7 @@ export function WelcomePage() {
       done: setupComplete,
       detail: (
         <div className="method-chips">
-          <Button size="small" variant="outlined" onClick={() => void navigate({ to: '/search', search: { q: undefined } })}>Global search</Button>
+          <Button size="small" variant="outlined" onClick={() => window.dispatchEvent(new Event('console:open-palette'))}>Global search</Button>
           <Button size="small" variant="outlined" onClick={() => void navigate({ to: '/access', search: { view: undefined, project: undefined, env: undefined } })}>Access control</Button>
           <Button size="small" variant="outlined" onClick={() => void navigate({ to: '/audit', search: { q: undefined, actor: undefined, operation: undefined, range: undefined } })}>Audit log</Button>
           <Button size="small" variant="outlined" onClick={() => void navigate({ to: '/automation', search: { path: undefined } })}>For agents</Button>

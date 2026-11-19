@@ -7,6 +7,7 @@ import { secretApiPath } from '@/lib/baoPaths';
 import { canAny } from '@/lib/capabilities';
 import { formatWhen, mask } from '@/lib/format';
 import { lifecycleCapabilityPaths, useAuditTrail, useSecretMetadata } from '@/lib/queries';
+import { searchIndex } from '@/lib/searchIndex';
 import { actorForVersion, diffData, otherVersion, type FieldDiff } from '@/lib/secretDiff';
 import { versionState } from '@/lib/secretLifecycle';
 import { useToast } from '@/lib/toast';
@@ -158,17 +159,21 @@ export function VersionHistoryPanel({
     const api = secretApiPath(project, env, service);
     try {
       if (pending.kind === 'delete') {
-        if (pending.version === undefined || pending.version === current) await bao.deleteLatestVersion(api);
-        else await bao.softDeleteVersions(api, [pending.version]);
+        if (pending.version === undefined || pending.version === current) {
+          await bao.deleteLatestVersion(api);
+          searchIndex.remove(service, { project, env });
+        } else await bao.softDeleteVersions(api, [pending.version]);
         addToast('success', `Version ${pending.version ?? current} moved to Trash`, 'Recoverable until it is destroyed.');
       } else if (pending.kind === 'undelete') {
         await bao.undeleteVersions(api, [pending.version!]);
         addToast('success', `Restored version ${pending.version}`, 'The version is readable again.');
       } else if (pending.kind === 'destroy') {
         await bao.destroyVersions(api, [pending.version!]);
+        if (pending.version === current) searchIndex.remove(service, { project, env });
         addToast('success', `Destroyed version ${pending.version}`, 'This cannot be undone.');
       } else {
         await bao.deleteSecretMetadata(api);
+        searchIndex.remove(service, { project, env });
         addToast('success', 'Secret permanently deleted', 'All versions and annotations were removed.');
         onSelectVersion(undefined);
       }

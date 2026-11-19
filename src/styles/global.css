@@ -275,19 +275,6 @@ textarea:focus {
 .env-switcher > select { width: auto; flex: 1; min-width: 170px; }
 .env-switcher > .env-tabs { flex: 1; }
 
-/* The only search left on the Secrets page: a key filter scoped to the open folder. */
-.folder-filter {
-  display: flex; align-items: center; gap: 0.4rem;
-  padding: 0.45rem var(--spacing-md); border-bottom: 1px solid var(--color-border);
-}
-.folder-filter svg { color: var(--color-text-muted); flex: none; }
-.folder-filter input {
-  flex: 1; min-width: 0; min-height: 32px; padding: 0.35rem 0.5rem;
-  border-radius: 8px;
-  color: var(--color-text-primary); font-size: 0.82rem;
-}
-.folder-filter .link-btn { font-size: 0.75rem; flex: none; }
-
 /* One primary action plus a compact overflow menu in the detail pane header. */
 .action-menu { position: relative; }
 .action-menu > summary { list-style: none; cursor: pointer; min-width: 34px; justify-content: center; }
@@ -683,21 +670,62 @@ textarea:focus {
   background: var(--color-surface); box-shadow: 0 16px 48px var(--color-shadow); overflow: hidden;
 }
 .palette__input { display: flex; align-items: center; gap: 0.6rem; padding: 0.85rem 1rem; border-bottom: 1px solid var(--color-border); }
-.palette__input > svg { flex: none; color: var(--color-text-muted); }
-.palette__input input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--color-text-primary); font-size: 0.95rem; }
-.palette__input kbd { flex: none; }
+.palette__input > svg { flex: 0 0 auto; color: var(--color-text-muted); }
+/* The palette is the one search surface: its input never shows a border,
+   outline or focus ring in any state. The esc chip sits beside it, never over it. */
+.palette__input input,
+.palette__input input:hover,
+.palette__input input:focus,
+.palette__input input:focus-visible {
+  flex: 1 1 auto; min-width: 0; border: 0; border-width: 0px; outline: none; outline-style: none;
+  box-shadow: none; background: transparent; color: var(--color-text-primary); font-size: 0.95rem;
+}
+.palette__input kbd { flex: 0 0 auto; margin-left: auto; }
+.palette__scopes {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem;
+  padding: 0.55rem 1rem; border-bottom: 1px solid var(--color-border);
+}
+.palette__scopes button {
+  display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.25rem 0.55rem;
+  border: 1px solid var(--color-border); border-radius: 999px; background: var(--color-surface);
+  color: var(--color-text-secondary); font-size: 0.72rem;
+}
+.palette__scopes button[aria-pressed='true'] {
+  border-color: var(--color-primary); background: var(--color-primary-light); color: var(--color-selected-fg);
+}
+.palette__scopes button:disabled { opacity: 0.4; cursor: not-allowed; }
+.palette__scope-hint { margin-left: auto; font-size: 0.68rem; color: var(--color-text-muted); }
 .palette__list { list-style: none; margin: 0; padding: 0.4rem; overflow-y: auto; }
+.palette__group-wrap { list-style: none; }
+.palette__heading {
+  display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.7rem 0.2rem;
+  font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-muted);
+}
+.palette__indexing { text-transform: none; letter-spacing: normal; color: var(--color-primary); }
+.palette__list ul { list-style: none; margin: 0; padding: 0; }
 .palette__item {
   display: flex; align-items: center; gap: 0.6rem; width: 100%; padding: 0.6rem 0.7rem;
   border: 0; border-radius: var(--radius-md); background: transparent; color: var(--color-text-primary);
   text-align: left; cursor: pointer; font-size: 0.85rem;
 }
-.palette__item > svg:first-child { flex: none; color: var(--color-text-muted); }
-.palette__item > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette__item-main {
+  display: flex; align-items: center; gap: 0.6rem; flex: 1; min-width: 0;
+  border: 0; background: transparent; color: inherit; text-align: left; font: inherit; padding: 0;
+}
+.palette__item-main > svg:first-child { flex: 0 0 auto; color: var(--color-text-muted); }
+.palette__item-main > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .palette__item.selected { background: var(--color-primary-light); color: var(--color-selected-fg); }
 .palette__item.selected > svg:first-child { color: var(--color-selected-fg); }
-.palette__group { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-muted); }
+.palette__meta { flex: 0 0 auto; font-size: 0.7rem; color: var(--color-text-muted); }
+.palette__mark { background: color-mix(in srgb, var(--color-primary) 25%, transparent); color: inherit; border-radius: 2px; padding: 0 1px; }
+.palette__star { flex: 0 0 auto; border: 0; background: transparent; color: var(--color-text-muted); padding: 0.2rem; border-radius: var(--radius-sm); }
+.palette__star.starred { color: var(--color-primary); }
+.palette__more {
+  display: flex; align-items: center; gap: 0.3rem; width: 100%; padding: 0.45rem 0.7rem;
+  border: 0; background: transparent; color: var(--color-primary); font-size: 0.75rem; text-align: left;
+}
 .palette__empty { padding: 1.2rem; text-align: center; color: var(--color-text-muted); font-size: 0.85rem; }
+.secret-field--selected { box-shadow: inset 3px 0 0 var(--color-primary); background: var(--color-primary-light); }
 .palette__foot {
   display: flex; align-items: center; gap: 0.35rem; padding: 0.55rem 1rem;
   border-top: 1px solid var(--color-border); font-size: 0.72rem; color: var(--color-text-muted);
