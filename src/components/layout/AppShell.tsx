@@ -4,8 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Activity, BookOpen, Compass, KeyRound, LogOut, Moon, RefreshCw, Search, Server, Shield, ShieldCheck, Sun, TerminalSquare, Trash2 } from 'lucide-react';
 import { bao } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { useProjects, useSetupStage } from '@/lib/queries';
-import { searchIndex } from '@/lib/searchIndex';
+import { useSetupStage } from '@/lib/queries';
 import { useTheme } from '@/lib/useTheme';
 import { formatTtl, tokenTtlLabel } from '@/lib/format';
 import { useSessionCountdown } from '@/lib/session';
@@ -31,7 +30,6 @@ export function AppShell() {
     (link.to !== '/audit' || auditConfigured)
     && (link.to !== '/welcome' || stage !== 'ready'));
   const auth = useAuth();
-  const projects = useProjects();
   const navigate = useNavigate();
   const { theme, toggle } = useTheme();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -49,13 +47,6 @@ export function AppShell() {
   useEffect(() => {
     if (auth.status === 'anonymous') void navigate({ to: '/login', replace: true });
   }, [auth.status, navigate]);
-
-  // Build the credential-free search index in the background after sign-in and
-  // clear it as soon as the session ends. start() also detects a token change.
-  useEffect(() => {
-    if (auth.status === 'authenticated') searchIndex.start(projects.data ?? []);
-    else if (auth.status === 'anonymous') searchIndex.clear();
-  }, [auth.status, auth.address, auth.identity, projects.data]);
 
   // Global keyboard shortcuts. Typing in a field takes priority so secret values
   // are never intercepted, and ⌘K stays owned by the command palette.

@@ -20,9 +20,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
-  RefreshCw,
   Search,
-  Star,
   Tag,
   Trash2,
   Undo2,
@@ -33,7 +31,7 @@ import { bao, BaoError, type CapabilitiesMap } from '@/lib/api';
 import { can, deniedReason } from '@/lib/capabilities';
 import { envRank, secretApiPath, secretPath } from '@/lib/baoPaths';
 import { envFile, formatWhen, mask } from '@/lib/format';
-import { pushRecent, folderOf, type SecretRef } from '@/lib/navigationMemory';
+import { pushRecent } from '@/lib/navigationMemory';
 import { countFieldChanges, dataFromRows, rowsFromData, validateRows, type FieldRow } from '@/lib/secretForm';
 import { buildReferenceLookup, findReferences, resolveReferences, parseKeyValueText, serializeKeyValue, type ImportFormat } from '@/lib/secretFormats';
 import { promotionPreview, promotionSummary, type PromotionPreview } from '@/lib/promotion';
@@ -46,9 +44,7 @@ import {
   type SecretAnnotations,
 } from '@/lib/secretMetadata';
 import { buildSecretTree, folderBreadcrumbs, folderInTree, secretName, validSecretPath, type SecretTreeFolder } from '@/lib/secretTree';
-import { searchIndex } from '@/lib/searchIndex';
-import { useFavorites } from '@/lib/useFavorites';
-import { useSearchIndexStatus } from '@/lib/useSearchIndex';
+import { matchesSearch } from '@/lib/searchMatch';
 import { groupFieldsByPrefix } from '@/lib/secretGroups';
 import { useAuth } from '@/lib/auth';
 import {
@@ -101,7 +97,7 @@ function editorSnapshot(editor: EditorState): string {
   return JSON.stringify({ name: editor.name, rows: editor.rows, annotations: editor.annotations });
 }
 
-function SecretField({ name, value, comment, override, resolved, resetKey, editable, editing, draftValue, removed, staged, selected, nextField, onStartEdit, onStage, onCancelEdit, onRemove, onUndoRemove }: {
+function SecretField({ name, value, comment, override, resolved, resetKey, editable, editing, draftValue, removed, staged, nextField, onStartEdit, onStage, onCancelEdit, onRemove, onUndoRemove }: {
   name: string;
   value: unknown;
   comment?: string;
@@ -116,8 +112,6 @@ function SecretField({ name, value, comment, override, resolved, resetKey, edita
   removed?: boolean;
   /** A key that does not exist on the server yet. */
   staged?: boolean;
-  /** Highlighted when opened from a palette field match. */
-  selected?: boolean;
   nextField?: string;
   onStartEdit?: (name: string) => void;
   onStage?: (name: string, value: string, nextField?: string) => void;
@@ -148,7 +142,7 @@ function SecretField({ name, value, comment, override, resolved, resetKey, edita
 
   return (
     <div
-      className={`secret-field${removed ? ' secret-field--removed' : ''}${changed ? ' secret-field--changed' : ''}${selected ? ' secret-field--selected' : ''}`}
+      className={`secret-field${removed ? ' secret-field--removed' : ''}${changed ? ' secret-field--changed' : ''}`}
       data-testid={`field-${name}`}
       data-inline-field={name}
     >
@@ -373,8 +367,6 @@ export function SecretsPage() {
   const identityName = identity?.display_name || identity?.name || 'local';
 
   const projects = useProjects();
-  const favorites = useFavorites();
-  const indexStatus = useSearchIndexStatus();
   const [project, setProject] = useState<string | undefined>(search.project);
   const discovery = useLayoutDiscovery(project);
   const environments = useEnvironments(project);
@@ -385,6 +377,7 @@ export function SecretsPage() {
   const allPaths = useMemo(() => pathsQ.data ?? [], [pathsQ.data]);
   const [folder, setFolder] = useState<string>(search.folder ?? '');
   const [service, setService] = useState<string | undefined>(search.service);
+  const [filter, setFilter] = useState('');
   const [tab, setTab] = useState<'env' | 'creds'>('env');
   const [version, setVersion] = useState<number | undefined>(undefined);
   const [promoteTo, setPromoteTo] = useState<string | null>(null);
@@ -501,36 +494,10 @@ export function SecretsPage() {
     if (project && env && service) pushRecent({ project, env, path: service });
   }, [project, env, service]);
 
-  // A palette command can open the create editor with a suggested name.
-  const handledCreate = useRef<string | null>(null);
-  useEffect(() => {
-    if (!search.create) { handledCreate.current = null; return; }
-    if (!project || !env || handledCreate.current === search.create) return;
-    handledCreate.current = search.create;
-    const name = search.folder ? `${search.folder}/${search.create}` : search.create;
-    openCreateAt(name);
-  }, [search.create, search.folder, project, env]);
-
   const capsQ = useCapabilities(capabilityPathsForFolder(project, env, folder, allPaths, envs));
   const caps = capsQ.data;
   const secretQ = useSecret(project, env, service, version);
   const metadataQ = useSecretMetadata(project, env, service);
-
-  // Field names already loaded for this secret are backfilled into the index so
-  // a field search works even when custom_metadata.fields was never written.
-  useEffect(() => {
-    if (project && env && service && secretQ.data) {
-      searchIndex.backfill({ project, env, path: service }, Object.keys(secretQ.data.data.data));
-    }
-  }, [project, env, service, secretQ.data]);
-
-  // A field match selects and reveals the matching row without changing layout.
-  useEffect(() => {
-    if (!search.field || !secretQ.data) return;
-    const target = document.querySelector(`[data-testid="field-${CSS.escape(search.field)}"]`);
-    target?.scrollIntoView({ block: 'center' });
-  }, [search.field, secretQ.data]);
-
   // Values for ${path.FIELD} previews. Reads are masked in the UI and never shown in snippets.
   const refQueries = useQueries({
     queries: allPaths.map((path) => ({
@@ -566,7 +533,9 @@ export function SecretsPage() {
   const canWriteMeta = can(caps, metaWritePath, 'update') ||
     Boolean(probe && can(caps, `kv/metadata/${probe}`, 'create'));
   const folderNode = folderInTree(tree, folder) ?? tree;
-  const shownSecrets = folderNode.secrets;
+  const filterText = filter.trim();
+  const filteredSecrets = folderNode.secrets.filter((path) =>
+    matchesSearch([secretName(path), path, ...(fieldNamesByPath[path] ?? [])], filterText));
   const crumbs = folderBreadcrumbs(folder);
   const fieldGroups = useMemo(
     () => groupFieldsByPrefix(secretQ.data?.data.data ?? {}),
@@ -663,23 +632,6 @@ export function SecretsPage() {
     setInlineAddOpen(false);
   }
 
-  /** Keep the credential-free field-name index current after any write. */
-  async function syncFields(path: string, fields: string[]) {
-    if (!project || !env) return;
-    searchIndex.upsert({
-      project, env, path,
-      folder: folderOf(path),
-      name: path.slice(path.lastIndexOf('/') + 1),
-      fields,
-      updatedAt: Date.now(),
-    });
-    try {
-      await bao.writeFieldNames(path, fields);
-    } catch {
-      // KV metadata is best-effort; the in-memory index is already up to date.
-    }
-  }
-
   async function saveInline() {
     if (!project || !env || !service || !secretQ.data || !inlineDirty) return;
     setSavingInline(true);
@@ -691,13 +643,13 @@ export function SecretsPage() {
       if (value === null) removals.push(key);
       else updates[key] = value;
     }
-    const next: Record<string, unknown> = { ...before };
-    for (const key of removals) delete next[key];
-    Object.assign(next, updates);
     try {
       if (removals.length > 0) {
         // A merge patch cannot delete keys, so removals need a full write. Use
         // CAS so a concurrent edit is reported rather than silently clobbered.
+        const next = { ...before };
+        for (const key of removals) delete next[key];
+        Object.assign(next, updates);
         await bao.writeSecret(apiPath, next, secretQ.data.data.metadata.version);
       } else {
         await bao.patchSecret(
@@ -706,7 +658,6 @@ export function SecretsPage() {
           metadataQ.data?.data.cas_required ? secretQ.data.data.metadata.version : undefined,
         );
       }
-      await syncFields(apiPath, Object.keys(next));
       await queryClient.invalidateQueries();
       const summary = [
         Object.keys(updates).length ? `${Object.keys(updates).length} updated` : '',
@@ -720,7 +671,6 @@ export function SecretsPage() {
           label: 'Undo',
           onClick: () => {
             void bao.writeSecret(apiPath, before)
-              .then(() => syncFields(apiPath, Object.keys(before)))
               .then(() => queryClient.invalidateQueries())
               .then(() => addToast('info', 'Changes undone', 'The previous field set was restored.'))
               .catch((error) => addToast('error', 'Undo failed', error instanceof Error ? error.message : undefined));
@@ -973,24 +923,12 @@ export function SecretsPage() {
       let annotationsSaved = !canWriteMeta;
       if (canWriteMeta) {
         try {
-          await bao.writeCustomMetadata(bare, {
-            ...mergeAnnotations(editor.baseMetadata, editor.annotations),
-            fields: JSON.stringify(Object.keys(data)),
-          });
+          await bao.writeCustomMetadata(bare, mergeAnnotations(editor.baseMetadata, editor.annotations));
           annotationsSaved = true;
         } catch {
           annotationsSaved = false;
         }
       }
-      // Rename removes the old path; the current field set is always indexed.
-      if (service && service !== name) searchIndex.remove(service, { project, env });
-      searchIndex.upsert({
-        project, env, path: name,
-        folder: folderOf(name),
-        name: name.slice(name.lastIndexOf('/') + 1),
-        fields: Object.keys(data),
-        updatedAt: Date.now(),
-      });
       await queryClient.invalidateQueries();
       if (annotationsSaved) {
         addToast('success', editor.mode === 'create' ? 'Secret created' : 'Secret saved', `kv/data/${bare} · values saved`);
@@ -1068,13 +1006,6 @@ export function SecretsPage() {
     const data = secretQ.data.data.data;
     try {
       await bao.writeSecret(target, data);
-      searchIndex.upsert({
-        project, env: promoteTo, path: service,
-        folder: folderOf(service),
-        name: service.slice(service.lastIndexOf('/') + 1),
-        fields: Object.keys(data),
-        updatedAt: Date.now(),
-      });
       await queryClient.invalidateQueries();
       addToast('success', `Promoted to ${promoteTo}`, `${project}/${service} now matches ${env} · ${promotionSummary(promotePreview)}.`);
       closePromote();
@@ -1124,34 +1055,6 @@ export function SecretsPage() {
               <FolderOpen size={17} />
               <h3>Folders</h3>
               <Badge size="small">{tree.folders.length}</Badge>
-              <button
-                type="button"
-                className="btn btn--small btn--ghost"
-                onClick={() => window.dispatchEvent(new CustomEvent('console:open-palette', { detail: { scope: 'folder' } }))}
-                title="Search this folder"
-                aria-label="Search this folder"
-                data-testid="folder-search"
-              >
-                <Search size={15} />
-              </button>
-              <details className="action-menu">
-                <summary className="btn btn--small btn--ghost" aria-label="Folder actions" title="More folder actions">
-                  <MoreHorizontal size={16} />
-                </summary>
-                <div className="action-menu__items">
-                  <button
-                    data-testid="refresh-index"
-                    onClick={(event) => {
-                      event.currentTarget.closest('details')?.removeAttribute('open');
-                      void searchIndex.refresh().then(() => addToast('success', 'Search index refreshed', 'Secret names and fields are searchable again.'));
-                    }}
-                    title="Rebuild the local search index"
-                  >
-                    <RefreshCw size={14} /> Refresh index
-                    {indexStatus.state === 'building' && <span className="small muted"> {indexStatus.done}/{indexStatus.total}</span>}
-                  </button>
-                </div>
-              </details>
               <Button
                 size="small"
                 variant="outlined"
@@ -1177,35 +1080,20 @@ export function SecretsPage() {
                 </span>
               ))}
             </nav>
-            <div style={{ padding: 0 }}>
-              {favorites.length > 0 && (
-                <>
-                  <div className="section-title" data-testid="starred-section" style={{ padding: '0 var(--spacing-md)' }}>
-                    <Star size={12} /> Starred
-                  </div>
-                  {favorites.map((ref: SecretRef) => (
-                    <button
-                      key={`${ref.project}/${ref.env}/${ref.path}/${ref.key ?? ''}`}
-                      className="list-item"
-                      onClick={() => guardInline(() => {
-                        if (ref.project !== project) setProject(ref.project);
-                        if (ref.env !== env) setEnv(ref.env);
-                        setFolder(folderOf(ref.path));
-                        setService(ref.path);
-                        setVersion(undefined);
-                      })}
-                      data-testid={`starred-${ref.path}`}
-                    >
-                      <Star size={15} />
-                      <span className="list-item__main">
-                        <span className="list-item__title">{ref.key ? `${ref.path} › ${ref.key}` : ref.path}</span>
-                        <span className="list-item__sub">{ref.project} / {ref.env}</span>
-                      </span>
-                    </button>
-                  ))}
-                  <div className="divider" style={{ margin: '0.5rem var(--spacing-md)' }} />
-                </>
+            <div className="folder-filter">
+              <Search size={14} aria-hidden="true" />
+              <input
+                aria-label="Filter keys in this folder"
+                placeholder="Filter keys…"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                data-testid="folder-filter"
+              />
+              {filter && (
+                <button type="button" className="link-btn" onClick={() => setFilter('')}>Clear</button>
               )}
+            </div>
+            <div style={{ padding: 0 }}>
               {pathsQ.isLoading && <div className="state"><div className="spinner" /></div>}
               {pathsQ.isError && <ErrorState error={pathsQ.error} onRetry={() => void pathsQ.refetch()} />}
               <FolderRows folder={tree} current={folder} depth={0} onSelect={(path) => guardInline(() => { setFolder(path); setService(undefined); setVersion(undefined); })} />
@@ -1214,14 +1102,14 @@ export function SecretsPage() {
               )}
               <div className="divider" style={{ margin: '0.5rem var(--spacing-md)' }} />
               <div className="section-title" style={{ padding: '0 var(--spacing-md)' }}>
-                Secrets in {folder || 'root'} ({shownSecrets.length})
+                Secrets in {folder || 'root'} ({filteredSecrets.length})
               </div>
-              {!pathsQ.isLoading && shownSecrets.length === 0 && (
+              {!pathsQ.isLoading && filteredSecrets.length === 0 && (
                 <p className="small muted" style={{ padding: '0 var(--spacing-md)' }}>
                   No secrets in this folder. Use <strong>New folder</strong> to create a path, or <strong>Import</strong> to add fields.
                 </p>
               )}
-              {shownSecrets.map((path) => {
+              {filteredSecrets.map((path) => {
                 const fields = fieldNamesByPath[path]?.length ?? 0;
                 return (
                   <button
@@ -1389,12 +1277,7 @@ export function SecretsPage() {
                     )}
                     {fieldGroups.length === 0 && <EmptyState title="Empty secret">This secret has no fields yet. Use <strong>Add key</strong> above to add the first one.</EmptyState>}
                     {fieldGroups.map((group) => (
-                      <details
-                        key={group.id}
-                        className="field-group"
-                        data-testid={`field-group-${group.id}`}
-                        open={search.field ? group.fields.some(([key]) => key === search.field) : undefined}
-                      >
+                      <details key={group.id} className="field-group" data-testid={`field-group-${group.id}`}>
                         <summary>
                           <span>{group.label}</span>
                           <Badge size="small">{group.fields.length}</Badge>
@@ -1416,7 +1299,6 @@ export function SecretsPage() {
                                 editing={inlineEditing === key}
                                 draftValue={inlineDraft[key]}
                                 removed={inlineDraft[key] === null}
-                                selected={search.field === key}
                                 nextField={inlineOrder[index + 1]}
                                 onStartEdit={setInlineEditing}
                                 onStage={stageInline}
@@ -1437,7 +1319,6 @@ export function SecretsPage() {
                           name={key}
                           value=""
                           staged
-                          selected={search.field === key}
                           resetKey={resetKey}
                           editable={writable && version === undefined}
                           editing={inlineEditing === key}
