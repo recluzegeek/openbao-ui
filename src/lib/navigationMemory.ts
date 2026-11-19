@@ -57,7 +57,6 @@ export function toggleFavorite(ref: Omit<SecretRef, 'visitedAt'>, storage: Stora
     ? current.filter((item) => refId(item) !== id)
     : [{ ...ref, visitedAt: Date.now() }, ...current];
   save(FAVORITE_KEY, next, storage);
-  if (typeof window !== 'undefined') window.dispatchEvent(new Event('console:favorites-changed'));
   return next;
 }
 
