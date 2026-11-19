@@ -380,7 +380,7 @@ export function SecretsPage() {
   const [promoteTo, setPromoteTo] = useState<string | null>(null);
   const [promoteAck, setPromoteAck] = useState(false);
   const [confirmCopyEnv, setConfirmCopyEnv] = useState(false);
-  const [showCompare, setShowCompare] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [editorBaseline, setEditorBaseline] = useState('');
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -1090,9 +1090,6 @@ export function SecretsPage() {
           </div>
 
           <div className="grid" style={{ gap: '1rem' }}>
-            {showCompare && service && project && (
-              <CompareEnvsPanel project={project} path={service} envs={envs} />
-            )}
             <div className="panel panel--sized secret-detail">
               <div className="panel__head secret-detail__head">
                 <KeyRound size={17} />
@@ -1139,15 +1136,13 @@ export function SecretsPage() {
                     </Button>
                     <Button
                       size="small"
-                      variant={showCompare ? 'primary' : 'ghost'}
+                      variant="outlined"
                       icon={<Columns3 size={15} />}
-                      onClick={() => setShowCompare((value) => !value)}
+                      onClick={() => setCompareOpen(true)}
                       title="Compare this field set across environments"
+                      data-testid="compare-envs-open"
                     >
                       Compare
-                    </Button>
-                    <Button size="small" icon={<Pencil size={15} />} onClick={() => void openEdit()} disabled={!writable} data-testid="edit-secret">
-                      Edit
                     </Button>
                     <details className="action-menu">
                       <summary className="btn btn--small btn--outlined" aria-label="More secret actions" title="More actions">
@@ -1379,6 +1374,18 @@ export function SecretsPage() {
             <RecentActivityPanel path={apiPath || undefined} />
           </div>
         </div>
+      )}
+
+      {compareOpen && project && service && (
+        <Dialog
+          title="Compare environments"
+          testId="compare-dialog"
+          wide
+          onClose={() => setCompareOpen(false)}
+          footer={<Button variant="outlined" onClick={() => setCompareOpen(false)}>Close</Button>}
+        >
+          <CompareEnvsPanel project={project} path={service} envs={envs} />
+        </Dialog>
       )}
 
       {confirmCopyEnv && secretQ.data && service && (

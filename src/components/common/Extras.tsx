@@ -65,12 +65,14 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
   );
 }
 
-export function Dialog({ title, onClose, children, footer, testId, guardClose }: {
+export function Dialog({ title, onClose, children, footer, testId, wide, guardClose }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
   testId?: string;
+  /** Wider layout for side-by-side comparison views. */
+  wide?: boolean;
   /** Return false to veto a dismiss (Escape, backdrop or close button), e.g. to confirm unsaved edits. */
   guardClose?: () => boolean;
 }) {
@@ -87,7 +89,7 @@ export function Dialog({ title, onClose, children, footer, testId, guardClose }:
 
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}>
-      <div className="dialog" role="dialog" aria-modal="true" aria-label={title} data-testid={testId}>
+      <div className={`dialog ${wide ? 'dialog--wide' : ''}`} role="dialog" aria-modal="true" aria-label={title} data-testid={testId}>
         <div className="dialog__head">
           <h2>{title}</h2>
           <button className="icon-btn" onClick={close} aria-label="Close dialog">
