@@ -12,7 +12,7 @@ import { versionState } from '@/lib/secretLifecycle';
 import { useToast } from '@/lib/toast';
 import { Badge } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
-import { Dialog, ErrorState } from '@/components/common/Extras';
+import { Dialog, EmptyState, ErrorState } from '@/components/common/Extras';
 
 interface VersionHistoryPanelProps {
   project: string;
@@ -195,7 +195,7 @@ export function VersionHistoryPanel({
   }[pending.kind];
 
   return (
-    <div className="panel" data-testid="version-history">
+    <div className="panel panel--sized" data-testid="version-history">
       <div className="panel__head">
         <History size={17} />
         <h3>Version history</h3>
@@ -225,7 +225,7 @@ export function VersionHistoryPanel({
       <div className="panel__body">
         {metaQ.isLoading && <div className="state"><div className="spinner" /></div>}
         {metaQ.isError && <ErrorState error={metaQ.error} onRetry={() => void metaQ.refetch()} />}
-        {versions.length === 0 && metaQ.isSuccess && <p className="muted">No versions are available for this secret.</p>}
+        {versions.length === 0 && metaQ.isSuccess && <EmptyState title="No versions yet">This secret has no readable version history.</EmptyState>}
         {versions.map((version) => {
           const meta = metaQ.data!.data.versions[String(version)];
           const actor = actorForVersion(entries, meta.created_time);

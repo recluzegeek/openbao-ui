@@ -293,10 +293,16 @@ textarea:focus {
 .action-menu__items button:hover:not(:disabled) { background: var(--color-primary-light); }
 .action-menu__items button:disabled { opacity: 0.45; cursor: not-allowed; }
 
+/* The four Secrets-screen blocks share one height and one empty-state shape. */
+.panel--sized { display: flex; flex-direction: column; min-height: 320px; }
+.panel--sized > .panel__body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.panel--sized > .panel__body > .state { margin: auto; }
+
 /* The detail pane scrolls on its own so actions stay pinned while fields scroll. */
-.secret-detail { display: flex; flex-direction: column; max-height: calc(100vh - 220px); min-height: 320px; }
+.secret-detail { max-height: calc(100vh - 220px); }
 .secret-detail__head { flex-wrap: wrap; position: sticky; top: 0; z-index: 10; background: var(--color-surface); }
 .secret-detail__body { overflow-y: auto; }
+.secret-detail__body > .meta-row { margin-top: auto; }
 
 /* Field groups collapse a long secret into a short list of expandable prefixes. */
 .field-group { border-bottom: 1px solid var(--color-border); }

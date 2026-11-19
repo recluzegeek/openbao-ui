@@ -70,7 +70,7 @@ export function SecretSettingsPanel({
   }
 
   return (
-    <div className="panel" data-testid="secret-settings">
+    <div className="panel panel--sized" data-testid="secret-settings">
       <div className="panel__head">
         <Settings2 size={17} />
         <h3>Version settings</h3>

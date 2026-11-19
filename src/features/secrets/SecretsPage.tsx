@@ -1044,7 +1044,7 @@ export function SecretsPage() {
         project ? <CredentialsPanel project={project} caps={caps} /> : <EmptyState title="Choose a project" />
       ) : (
         <div className="grid grid--split">
-          <div className="panel">
+          <div className="panel panel--sized">
             <div className="panel__head">
               <FolderOpen size={17} />
               <h3>Folders</h3>
@@ -1063,13 +1063,10 @@ export function SecretsPage() {
               {pathsQ.isLoading && <div className="state"><div className="spinner" /></div>}
               {pathsQ.isError && <ErrorState error={pathsQ.error} onRetry={() => void pathsQ.refetch()} />}
               <FolderRows folder={tree} current={folder} depth={0} onSelect={(path) => guardInline(() => { setFolder(path); setService(undefined); setVersion(undefined); })} />
-              {!pathsQ.isLoading && tree.folders.length === 0 && folderNode.secrets.length === 0 && (
-                <p className="small muted" style={{ padding: '0 var(--spacing-md)' }}>No folders in this project yet.</p>
-              )}
               {!pathsQ.isLoading && folderNode.secrets.length === 0 && (
-                <p className="small muted" style={{ padding: '0 var(--spacing-md)' }}>
-                  No secrets in this folder. Use <strong>New folder</strong> to create a path, or <strong>Import</strong> to add fields.
-                </p>
+                <EmptyState title={tree.folders.length === 0 ? 'No folders yet' : 'No secrets in this folder'}>
+                  Use <strong>New folder</strong> to create a KV path, or <strong>Import</strong> to add fields.
+                </EmptyState>
               )}
               {folderNode.secrets.map((path) => {
                 const fields = fieldNamesByPath[path]?.length ?? 0;
@@ -1096,7 +1093,7 @@ export function SecretsPage() {
             {showCompare && service && project && (
               <CompareEnvsPanel project={project} path={service} envs={envs} />
             )}
-            <div className="panel secret-detail">
+            <div className="panel panel--sized secret-detail">
               <div className="panel__head secret-detail__head">
                 <KeyRound size={17} />
                 <h3>{service ? secretName(service) : 'Select a secret'}</h3>
@@ -1220,7 +1217,11 @@ export function SecretsPage() {
                     {service && <><ChevronRight size={13} /><span className="mono strong">{secretName(service)}</span></>}
                   </nav>
                 )}
-                {!service && <p className="muted">Pick a folder on the left, then choose a secret. <strong>New folder</strong> creates a new path; <strong>Import</strong> adds fields to a new secret.</p>}
+                {!service && (
+                  <EmptyState title="Select a secret">
+                    Pick a folder on the left, then choose a secret. <strong>New folder</strong> creates a new path; <strong>Import</strong> adds fields to a new secret.
+                  </EmptyState>
+                )}
                 {service && secretQ.data && !writable && caps && <div className="notice warning small">{deniedReason(caps, currentPath, 'update')}</div>}
                 {secretQ.isLoading && <div className="state"><div className="spinner" /></div>}
                 {secretNotFound && (
@@ -1342,7 +1343,6 @@ export function SecretsPage() {
                       </div>
                     )}
                     {inlineError && <div className="notice error small" role="alert">{inlineError}</div>}
-                    <div className="divider" />
                     <div className="meta-row">
                       <span>Version {secretQ.data.data.metadata.version}</span>
                       <span>·</span>
