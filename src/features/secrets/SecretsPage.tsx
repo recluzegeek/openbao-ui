@@ -1059,20 +1059,6 @@ export function SecretsPage() {
                 New folder
               </Button>
             </div>
-            <nav className="folder-crumbs" aria-label="Folder location">
-              {crumbs.map((crumb, index) => (
-                <span key={crumb.path || 'root'} className="folder-crumbs__part">
-                  {index > 0 && <ChevronRight size={12} />}
-                  <button
-                    className="link-btn mono"
-                    onClick={() => guardInline(() => { setFolder(crumb.path); setService(undefined); setVersion(undefined); })}
-                    aria-current={folder === crumb.path ? 'location' : undefined}
-                  >
-                    {index === 0 ? 'Root' : crumb.label}
-                  </button>
-                </span>
-              ))}
-            </nav>
             <div style={{ padding: 0 }}>
               {pathsQ.isLoading && <div className="state"><div className="spinner" /></div>}
               {pathsQ.isError && <ErrorState error={pathsQ.error} onRetry={() => void pathsQ.refetch()} />}
