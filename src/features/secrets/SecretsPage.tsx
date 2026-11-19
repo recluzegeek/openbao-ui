@@ -1048,7 +1048,6 @@ export function SecretsPage() {
             <div className="panel__head">
               <FolderOpen size={17} />
               <h3>Folders</h3>
-              <Badge size="small">{folderNode.secrets.length}</Badge>
               <Button
                 size="small"
                 variant="outlined"
@@ -1081,10 +1080,6 @@ export function SecretsPage() {
               {!pathsQ.isLoading && tree.folders.length === 0 && folderNode.secrets.length === 0 && (
                 <p className="small muted" style={{ padding: '0 var(--spacing-md)' }}>No folders in this project yet.</p>
               )}
-              <div className="divider" style={{ margin: '0.5rem var(--spacing-md)' }} />
-              <div className="section-title" style={{ padding: '0 var(--spacing-md)' }}>
-                Secrets in {folder || 'root'} ({folderNode.secrets.length})
-              </div>
               {!pathsQ.isLoading && folderNode.secrets.length === 0 && (
                 <p className="small muted" style={{ padding: '0 var(--spacing-md)' }}>
                   No secrets in this folder. Use <strong>New folder</strong> to create a path, or <strong>Import</strong> to add fields.
