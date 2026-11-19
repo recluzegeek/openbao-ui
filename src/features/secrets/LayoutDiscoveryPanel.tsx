@@ -114,7 +114,6 @@ export function LayoutDiscoveryPanel({ project, discovery, error }: {
       <div className="panel__head">
         <Layers size={17} />
         <h3>Server layout</h3>
-        <Badge size="small" variant="outline">{discovery.profile.kind}</Badge>
         {warningGroups.length > 0 && (
           <button
             type="button"

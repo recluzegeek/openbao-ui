@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef, type MouseEvent } from 'react';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { ChevronDown, FolderKanban, Layers } from 'lucide-react';
 import { envRank } from '@/lib/baoPaths';
@@ -15,6 +15,8 @@ export function ScopeSwitcher() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const search = useRouterState({ select: (state) => state.location.search }) as Record<string, string | undefined>;
   const isSecrets = pathname === '/secrets' || pathname === '/';
+  const projectRef = useRef<HTMLSelectElement>(null);
+  const envRef = useRef<HTMLSelectElement>(null);
 
   const projects = useProjects();
   const project = search.project ?? projects.data?.[0];
@@ -42,12 +44,28 @@ export function ScopeSwitcher() {
     });
   }
 
+  // A click anywhere in the chip should open its select, not just a click on
+  // the narrow native control. Clicks on the select itself keep native behaviour.
+  function openPicker(select: HTMLSelectElement | null, event: MouseEvent<HTMLLabelElement>) {
+    if (!select || select.disabled || event.target === select) return;
+    event.preventDefault();
+    select.focus();
+    const picker = (select as HTMLSelectElement & { showPicker?: () => void }).showPicker;
+    try {
+      if (picker) picker.call(select);
+      else select.click();
+    } catch {
+      // showPicker is unavailable in some browsers; focus is still useful.
+    }
+  }
+
   return (
     <div className="scope-switcher" data-testid="scope-switcher">
-      <label className="scope-select" title="Switch project">
+      <label className="scope-select" title="Switch project" onClick={(event) => openPicker(projectRef.current, event)}>
         <FolderKanban size={15} aria-hidden="true" />
         <span className="scope-select__label">Project</span>
         <select
+          ref={projectRef}
           aria-label="Project"
           data-testid="scope-project"
           value={project ?? ''}
@@ -60,10 +78,11 @@ export function ScopeSwitcher() {
         <ChevronDown size={14} className="scope-select__chevron" aria-hidden="true" />
       </label>
 
-      <label className="scope-select" title={loading ? 'Discovering environments…' : 'Switch environment'}>
+      <label className="scope-select" title={loading ? 'Discovering environments…' : 'Switch environment'} onClick={(event) => openPicker(envRef.current, event)}>
         <Layers size={15} aria-hidden="true" />
         <span className="scope-select__label">Environment</span>
         <select
+          ref={envRef}
           aria-label="Environment"
           data-testid="scope-environment"
           value={env ?? ''}
